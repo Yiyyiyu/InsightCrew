@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.so
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environment
+.env
+.env.example
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# Docker (local overrides, not in repo)
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+#Markdown
+PRD.md
+简历项目介绍.md

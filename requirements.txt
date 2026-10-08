@@ -1,0 +1,49 @@
+# InsightCrew 项目依赖
+# 安装: pip install -r requirements.txt
+# Python >=3.10,<3.14  (conda env MultiAgent-Team = 3.11.17)
+# 
+# 核心包锁定大版本，其余由 pip 自动解析依赖树
+
+# === 核心框架（锁定，与 Python 3.11 兼容） ===
+crewai>=1.15,<2.0
+crewai-tools>=1.15,<2.0
+litellm>=1.100,<2.0
+
+# === 异步 Web 服务 ===
+fastapi>=0.140,<1.0
+uvicorn[standard]>=0.50,<1.0
+sse-starlette>=1.8,<2.0
+python-multipart>=0.0.5
+httpx>=0.28,<1.0
+
+# === 数据库与队列 ===
+asyncpg>=0.29,<1.0
+sqlalchemy[asyncio]>=2.0,<3.0
+aiosqlite>=0.20,<1.0
+alembic>=1.13,<2.0
+redis>=5.0,<6.0
+arq>=0.28,<1.0
+
+# === 鉴权 ===
+python-jose[cryptography]>=3.3,<4.0
+passlib[bcrypt]>=1.7,<2.0
+
+# === 检索与抓取 ===
+beautifulsoup4>=4.12,<5.0
+lxml>=5.2,<6.0
+trafilatura>=1.10,<2.0
+
+# === 前端模板 ===
+jinja2>=3.1,<4.0
+aiofiles>=24.1,<25.0
+
+# === 工具 ===
+python-dotenv>=1.0,<2.0
+pyyaml>=6.0,<7.0
+pydantic>=2.7,<3.0
+pydantic-settings>=2.3,<3.0
+
+# === 开发与调试 ===
+# loguru/rich 由 crewai 及其依赖自动引入，不在此锁定版本
+loguru
+rich

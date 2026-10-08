@@ -1,0 +1,53 @@
+# InsightCrew 模型路由配置
+# 详见 PRD §6 模型路由
+
+strategy: heterogeneous
+default_model: main
+
+models:
+  main:
+    litellm: "deepseek/deepseek-flash"
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 4096
+    temperature: 0.3
+  reasoner:
+    litellm: "deepseek/deepseek-v4-pro"
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+    temperature: 0.2
+  vision:
+    litellm: "zai/glm-4v-plus"
+    api_key_env: ZHIPU_API_KEY
+    max_tokens: 2048
+  premium:
+    litellm: "openai/gpt-4o-mini"
+    api_key_env: OPENAI_API_KEY
+    api_base: "https://linoapi.com.cn/v1"
+    max_tokens: 4096
+    temperature: 0.3
+  # long:                # 千问暂不启用，保留占位
+  #   litellm: "dashscope/qwen-long"
+  #   api_key_env: DASHSCOPE_API_KEY
+  #   max_tokens: 8192
+
+fallback_chain: [main, premium]
+budget:
+  per_task_limit_cny: 5.0
+  on_exceed: abort
+
+routing:
+  - when: { modality: vision }
+    use: vision
+  - when: { agent: [Planner, Analyst, Critic, Reviewer] }
+    use: reasoner
+  - when: { task_kind: long_context }
+    use: main
+  - when: { agent: Writer }
+    use: main
+
+overrides:
+  Writer:
+    max_tokens: 8000
+    temperature: 0.4
+  Critic:
+    temperature: 0.7
