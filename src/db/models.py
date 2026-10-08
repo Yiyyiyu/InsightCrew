@@ -27,6 +27,7 @@ class Task(Base):
     gate_status = Column(String(32), default="none")
     result_report_id = Column(Integer, nullable=True)
     total_cost_cny = Column(Float, default=0.0)
+    exec_path = Column(String(32), default="")   # "arq" / "fallback(main)" / "fallback(worker)"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

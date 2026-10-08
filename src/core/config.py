@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
 
     # ---- 运行 ----
+    host: str = "0.0.0.0"
+    port: int = 8000
     worker_concurrency: int = 3
     max_parallel_researchers: int = 3
     task_budget_limit_cny: float = 5.0

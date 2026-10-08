@@ -59,6 +59,7 @@ class TaskStatusResponse(BaseModel):
     pending_gate: str | None = None
     report_draft: str | None = None
     review_output: str | None = None
+    exec_path: str = "unknown"
     created_at: str | None = None
 
 

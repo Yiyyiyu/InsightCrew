@@ -14,7 +14,6 @@ htmlcov/
 
 # Environment
 .env
-.env.example
 .venv/
 venv/
 
@@ -37,11 +36,8 @@ docker-compose.override.yml
 # Logs
 *.log
 logs/
+Markdown/
 
 # OS files
 .DS_Store
 Thumbs.db
-
-#Markdown
-PRD.md
-简历项目介绍.md
