@@ -8,7 +8,13 @@ Agent 角色定义与编排
 from crewai import Crew, Process
 
 from src.agents.planner import create_planner, create_plan_task
-from src.agents.researcher import create_researcher, create_research_tasks
+from src.agents.researcher import (
+    create_researcher,
+    create_research_agents,
+    create_research_tasks,
+    create_single_research_crew,
+    subdirection_names,
+)
 from src.agents.analyst import create_analyst, create_analysis_task
 from src.agents.critic import create_critic, create_critic_task
 from src.agents.writer import create_writer, create_write_task
@@ -20,12 +26,16 @@ from src.core.model_router import router as model_router
 def _resolve_agent_config(agent_name: str):
     """通过 model_router 获取 Agent 的 CrewAI LLM 实例"""
     from crewai import LLM
+    from src.core.config import settings
+
     route = model_router.route(agent=agent_name)
     llm_kwargs = {
         "model": route.model_id,
         "api_key": route.api_key,
         "temperature": route.temperature,
         "max_tokens": route.max_tokens,
+        # 硬超时：避免单次 LLM 请求永久挂起（litellm 会中断底层 HTTP）
+        "timeout": settings.llm_timeout_sec,
     }
     if route.api_base:
         llm_kwargs["base_url"] = route.api_base
@@ -46,12 +56,20 @@ def create_plan_crew(topic: str) -> Crew:
 
 
 def create_research_crew(plan: str) -> Crew:
-    """阶段2: 检索取证 Crew（3个并行 Researcher 任务）"""
-    llm = _resolve_agent_config("Researcher")
-    agent = create_researcher(llm=llm)
-    tasks = create_research_tasks(agent, plan)
+    """阶段2: 检索取证 Crew（3 个检索任务，串行执行）
+
+    ★ 实际编排不走这里：research 阶段由 orchestrator 调
+    `create_single_research_crew` 为每个子方向各建一个独立 Crew，
+    再用 asyncio.gather 并发 + 各自硬超时（单方向失败可隔离）。
+    本函数保留给串行/调试场景。
+
+    注意：每个任务必须绑**独立**的 Researcher 实例——CrewAI 一个 Agent 只持有
+    一个 Executor，共享实例并发会抛 "Executor is already running"。
+    """
+    agents = create_research_agents(llm_factory=lambda: _resolve_agent_config("Researcher"))
+    tasks = create_research_tasks(agents, plan)
     return Crew(
-        agents=[agent],
+        agents=agents,
         tasks=tasks,
         process=Process.sequential,
         verbose=True,

@@ -78,13 +78,23 @@ class ModelRouter:
             api_base = "http://127.0.0.1:8001/v1"
             api_key = "mock-key"
 
+        # 应用 per-Agent overrides（max_tokens / temperature）
+        # 注意：overrides 里的 api_key_env / litellm 不支持覆盖，只覆盖生成参数
+        max_tokens = model_def.get("max_tokens", 4096)
+        temperature = model_def.get("temperature", 0.3)
+        override = self._config.get("overrides", {}).get(agent, {})
+        if "max_tokens" in override:
+            max_tokens = override["max_tokens"]
+        if "temperature" in override:
+            temperature = override["temperature"]
+
         return ModelRoute(
             model_id=litellm,
             provider=provider,
             api_key=api_key or "no-key-configured",
             api_base=api_base,
-            max_tokens=model_def.get("max_tokens", 4096),
-            temperature=model_def.get("temperature", 0.3),
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
     def create_completion_args(self, agent: str = "", modality: str = "text", task_kind: str = "") -> dict:

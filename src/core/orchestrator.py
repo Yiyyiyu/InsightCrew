@@ -12,6 +12,7 @@
 
 import json
 import asyncio
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -269,10 +270,48 @@ async def execute_stage(task_id: int, stage: str) -> dict:
         elif stage == "research":
             if not plan:
                 raise ValueError("缺少 plan_output，无法执行 research 阶段")
-            crew = create_research_crew(plan)
-            result = await _run_crew_safe(crew)
-            output = _flatten_crew_output(result)
+            # ★ 不走 CrewAI 自带的 async_execution：实测 3 任务共享一个 Crew
+            # 时耗时远超单任务之和（单任务 18.8s，3 任务撞穿 300s 阶段超时），
+            # 且单任务超时无法隔离。改为每个子方向一个独立 Crew，由本层
+            # asyncio.gather 并发 + 各自硬超时，单个方向失败不拖垮其余方向。
+            parts = await _run_research_fanout(task_id, plan)
+            output = _flatten_crew_output([text for _, text in parts])
             await _save_intermediate(task_id, "research_output", output)
+            await _save_intermediate(task_id, "research_parts", {
+                name: {"chars": len(text)} for name, text in parts
+            })
+            _push_event(task_id, "research_fanout", {
+                "stage": stage,
+                "directions": [{"name": n, "chars": len(t)} for n, t in parts],
+            })
+
+            # ── 引用台账硬校验（PRD：不入库不引用）──
+            # 工具层已把每个来源写入 sources/chunks，这里校验 LLM 抄写的标记
+            # 是否真实存在，并把带标记的句子落成 claims + claim_evidence。
+            from src.core.ledger import verify_citations, record_claims
+
+            check = await verify_citations(output)
+            claims = await record_claims(output, task_id)
+            await _save_intermediate(task_id, "citation_check", {
+                "total": check["total"],
+                "valid": len(check["valid"]),
+                "invalid": len(check["invalid"]),
+                "rate": round(check["rate"], 4),
+                "pass": check["pass"],
+                "hallucinated": [d["marker"] for d in check["invalid"]][:20],
+                "claims": claims["claims"],
+                "evidence": claims["evidence"],
+            })
+            logger.info(
+                f"[{task_id}] 引用校验: {len(check['valid'])}/{check['total']} 有效"
+                f"（幻觉 {len(check['invalid'])}），"
+                f"落账 claims={claims['claims']} evidence={claims['evidence']}"
+            )
+            _push_event(task_id, "citation_check", {
+                "stage": stage, "total": check["total"],
+                "valid": len(check["valid"]), "invalid": len(check["invalid"]),
+                "pass": check["pass"],
+            })
 
         elif stage == "analysis":
             if not research:
@@ -297,6 +336,31 @@ async def execute_stage(task_id: int, stage: str) -> dict:
             result = await _run_crew_safe(crew)
             output = result if isinstance(result, str) else str(result)
             await _save_intermediate(task_id, "report_draft", output)
+
+            # ── 终稿引用硬校验：Writer 可能新增或改坏引用标记 ──
+            from src.core.ledger import verify_citations, record_claims
+
+            check = await verify_citations(output)
+            claims = await record_claims(output, task_id)
+            await _save_intermediate(task_id, "citation_check_final", {
+                "total": check["total"],
+                "valid": len(check["valid"]),
+                "invalid": len(check["invalid"]),
+                "rate": round(check["rate"], 4),
+                "pass": check["pass"],
+                "hallucinated": [d["marker"] for d in check["invalid"]][:20],
+                "claims": claims["claims"],
+                "evidence": claims["evidence"],
+            })
+            logger.info(
+                f"[{task_id}] 终稿引用校验: {len(check['valid'])}/{check['total']} 有效"
+                f"（幻觉 {len(check['invalid'])}）"
+            )
+            _push_event(task_id, "citation_check", {
+                "stage": stage, "total": check["total"],
+                "valid": len(check["valid"]), "invalid": len(check["invalid"]),
+                "pass": check["pass"],
+            })
 
         elif stage == "review":
             report_draft = await _load_intermediate(task_id, "report_draft")
@@ -492,13 +556,85 @@ async def abort_pipeline(task_id: int):
 # ── 内部辅助 ──
 
 async def _run_crew_safe(crew) -> str:
-    """安全运行 Crew.kickoff()，捕获异常"""
+    """安全运行 Crew.kickoff_async()，带硬超时。
+
+    超时是硬约束：单阶段墙钟超过 settings.stage_timeout_sec 后取消并抛
+    TimeoutError，由 execute_stage 的 except 分支写 stage_error 事件、
+    标记任务 failed，而不是让整个流水线永久挂起。
+    """
+    timeout = settings.stage_timeout_sec
     try:
-        result = await crew.kickoff_async()
+        result = await asyncio.wait_for(crew.kickoff_async(), timeout=timeout)
         return result
+    except asyncio.TimeoutError:
+        logger.error(f"Crew 执行超时（>{timeout}s），已强制中断")
+        raise TimeoutError(f"Crew 执行超过 {timeout} 秒未返回，已中断")
     except Exception as e:
         logger.error(f"Crew 执行失败: {e}")
         raise
+
+
+async def _run_research_fanout(task_id: int, plan: str) -> list[tuple[str, str]]:
+    """并发跑各检索子方向，每个方向一个独立 Crew + 独立硬超时。
+
+    返回 [(方向名, 输出文本)]，**失败的子方向被剔除**（记日志 + 推事件），
+    只要还有 ≥1 个方向成功就继续（部分成功优于整体失败）。
+    全部失败才抛错。
+
+    超时用 settings.stage_timeout_sec 的一半做单方向上限：并发下总墙钟
+    约等于最慢的那个方向，留出余量给引用校验与落库。
+    """
+    from src.agents import create_single_research_crew, subdirection_names
+    from src.agents import _resolve_agent_config
+
+    names = subdirection_names()
+    per_timeout = max(60, settings.stage_timeout_sec // 2)
+    sem = asyncio.Semaphore(settings.max_parallel_researchers)
+
+    async def run_one(idx: int, name: str) -> tuple[str, str]:
+        async with sem:
+            # 每个方向独立 LLM 实例，避免并发共享客户端状态
+            crew = create_single_research_crew(
+                llm=_resolve_agent_config("Researcher"), index=idx, plan=plan
+            )
+            t0 = time.monotonic()
+            try:
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=per_timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{task_id}] 子方向 {name} 超时（>{per_timeout}s），跳过")
+                _push_event(task_id, "research_direction_failed",
+                            {"direction": name, "reason": "timeout"})
+                raise
+            except Exception as e:
+                logger.warning(f"[{task_id}] 子方向 {name} 失败: {e}")
+                _push_event(task_id, "research_direction_failed",
+                            {"direction": name, "reason": str(e)[:200]})
+                raise
+            dt = time.monotonic() - t0
+            text = result if isinstance(result, str) else str(result)
+            logger.info(f"[{task_id}] 子方向 {name} 完成: {len(text)} 字符 / {dt:.1f}s")
+            _push_event(task_id, "research_direction_done",
+                        {"direction": name, "chars": len(text), "seconds": round(dt, 1)})
+            return name, text
+
+    results = await asyncio.gather(
+        *(run_one(i, n) for i, n in enumerate(names)),
+        return_exceptions=True,
+    )
+
+    parts: list[tuple[str, str]] = []
+    for name, r in zip(names, results):
+        if isinstance(r, BaseException):
+            continue
+        parts.append(r)
+
+    if not parts:
+        raise RuntimeError(
+            f"[{task_id}] research 阶段所有 {len(names)} 个子方向均失败"
+        )
+    if len(parts) < len(names):
+        logger.warning(f"[{task_id}] research 仅 {len(parts)}/{len(names)} 个子方向成功")
+    return parts
 
 
 def _flatten_crew_output(result) -> str:

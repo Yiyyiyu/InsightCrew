@@ -17,6 +17,13 @@ htmlcov/
 .venv/
 venv/
 
+# CrewAI 运行时产物（本机运行生成，勿提交）
+.crewai/
+crewai_settings.json
+
+# CrewAI 在受限沙箱下的配置目录重定向（本机运行时生成）
+.dev-home/
+
 # IDE
 .idea/
 .vscode/
@@ -36,7 +43,10 @@ docker-compose.override.yml
 # Logs
 *.log
 logs/
-Markdown/
+
+# 本地私用内容，不入仓库（前导 / 锚定仓库根，避免误伤 src/tools/）
+/Markdown/
+/tools/
 
 # OS files
 .DS_Store

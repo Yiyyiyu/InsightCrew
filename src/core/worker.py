@@ -33,7 +33,9 @@ class WorkerSettings:
     redis_settings = REDIS_SETTINGS
     keep_result = 3600          # 结果保留 1 小时
     keep_result_forever = False
-    timeout = 600               # 单任务最长 10 分钟
+    # arq 层超时 = 阶段超时 + 60s 余量（阶段自身已有 asyncio.wait_for 硬超时，
+    # 这里留出余量以便 orchestrator 有机会写 stage_error 事件、标记 failed）
+    timeout = settings.stage_timeout_sec + 60
     poll_delay = 0.5            # 轮询间隔
 
 
