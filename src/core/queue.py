@@ -24,6 +24,31 @@ from src.core.events import _get_redis
 
 STAGES = ["plan", "research", "analysis", "critic", "rebuttal", "write", "review"]
 
+# ── 人工闸门阶段（闸门收敛，用户 m18246/m18259 拍板）──
+#
+# 判据：**这个节点上人类能不能做出机器做不了的判断，且错了代价多大。**
+#
+#   * plan     ✅ 唯一能改「问题本身」的点：方向错，后面全白跑。评审成本最低
+#                （几百字），杠杆最高。
+#   * research ✅ 唯一能改「证据基础」的点：产品承诺就是可追溯。评审成本低
+#                （来源清单 + 关键 chunk）。
+#   * review   ✅ 交付物验收点：批准即完成。打回时回退到 write。
+#
+# 被砍掉的四个阶段不是不重要，而是「机器能自己判断」：
+#   * analysis —— 对**已批准**证据的推导；实质问题由 critic→rebuttal 自动闭环。
+#   * critic   —— 产物本就是给 rebuttal 消费的，人工在此挑质疑会让自动回应
+#                  机制失去意义。
+#   * rebuttal —— 内部修正步骤，产物直接进 write。
+#   * write    —— 验收挪到 review 之后做（能看到「报告 + 审核意见」，信息更全）。
+#
+# 结果：人工交互 7 次 → 3 次，砍掉的是中间加工，留下的是只有用户能拍板的
+# 三件事：**方向对不对、证据够不够、交付物收不收**。
+#
+# 这一份是**默认路径**。接口留宽（`approve_gate`/`reject_gate` 的 `gate_name`
+# 本就是入参，机制通用；`/research/{id}/pause` 可把任意阶段边界临时变成闸门），
+# 默认路径收窄。
+GATE_STAGES = ("plan", "research", "review")
+
 STAGE_LABELS = {
     "plan": "调研规划",
     "research": "检索取证",

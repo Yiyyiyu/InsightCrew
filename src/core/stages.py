@@ -28,6 +28,7 @@ from src.core.artifacts import (
 from src.core.critique import _critique_resolution_rate
 from src.core.events import _push_event
 from src.core.queue import STAGE_LABELS
+from src.core.timeouts import classify_timeout
 
 
 async def execute_stage(task_id: int, stage: str) -> dict:
@@ -104,11 +105,12 @@ async def execute_stage(task_id: int, stage: str) -> dict:
         elif stage == "research":
             if not plan:
                 raise ValueError("缺少 plan_output，无法执行 research 阶段")
-            # ★ 不走 CrewAI 自带的 async_execution：实测 3 任务共享一个 Crew
+            # ★ 不走 CrewAI 自带的 async_execution：实测多任务共享一个 Crew
             # 时耗时远超单任务之和（单任务 18.8s，3 任务撞穿 300s 阶段超时），
             # 且单任务超时无法隔离。改为每个子方向一个独立 Crew，由本层
             # asyncio.gather 并发 + 各自硬超时，单个方向失败不拖垮其余方向。
-            parts = await _run_research_fanout(task_id, plan)
+            # ★ 子方向由 plan 动态派生（数量不定），不再是写死的 3 个。
+            parts = await _run_research_fanout(task_id, plan, topic)
             output = _flatten_crew_output([text for _, text in parts])
             await _save_intermediate(task_id, "research_output", output)
             await _save_intermediate(task_id, "research_parts", {
@@ -312,9 +314,16 @@ async def _run_crew_safe(crew, task_id: int = 0, stage: str = "") -> str:
     try:
         try:
             result = await asyncio.wait_for(crew.kickoff_async(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
+            # 归因见 src/core/timeouts.py：3.11 起 asyncio.TimeoutError 与
+            # TimeoutError 同类，只能按消息区分内层 Crew 超时与本层墙钟超时，
+            # 不区分就会把内层超时谎报成「Crew 执行超时（>300s）」。
+            attr = classify_timeout(e, timeout)
+            if attr.internal:
+                logger.error(f"Crew {attr.reason}")
+                raise TimeoutError(f"Crew {attr.reason}") from e
             logger.error(f"Crew 执行超时（>{timeout}s），已强制中断")
-            raise TimeoutError(f"Crew 执行超过 {timeout} 秒未返回，已中断")
+            raise TimeoutError(f"Crew 执行超过 {timeout} 秒未返回，已中断") from e
         except Exception as e:
             logger.error(f"Crew 执行失败: {e}")
             raise
@@ -328,28 +337,43 @@ async def _run_crew_safe(crew, task_id: int = 0, stage: str = "") -> str:
     return result
 
 
-async def _run_research_fanout(task_id: int, plan: str) -> list[tuple[str, str]]:
+async def _run_research_fanout(task_id: int, plan: str, topic: str = "") -> list[tuple[str, str]]:
     """并发跑各检索子方向，每个方向一个独立 Crew + 独立硬超时。
 
     返回 [(方向名, 输出文本)]，**失败的子方向被剔除**（记日志 + 推事件），
     只要还有 ≥1 个方向成功就继续（部分成功优于整体失败）。
     全部失败才抛错。
 
-    超时用 settings.stage_timeout_sec 的一半做单方向上限：并发下总墙钟
-    约等于最慢的那个方向，留出余量给引用校验与落库。
-    """
-    from src.agents import create_single_research_crew, subdirection_names
-    from src.agents import _resolve_agent_config
+    ★ 子方向由 `plan` 动态派生（P0 硬编码缺陷的修法），所以**本函数内只
+    解析一次**并把结果传下去 —— 若在循环里反复调 `subdirection_names(plan)`
+    与 `create_single_research_crew(..., plan)`，两者各解析一次，一旦计划里
+    的 JSON 有歧义就可能解析出不同的列表，导致索引错位（A 方向的提示词配
+    给 B 方向）。这里显式传 `subs` 消除这种可能。
 
-    names = subdirection_names()
-    per_timeout = max(60, settings.stage_timeout_sec // 2)
+    超时用 `stage_timeout_sec - 60` 做单方向上限：并发下总墙钟约等于最慢的
+    那个方向，留 60s 余量给引用校验与落库。
+
+    ★ 这里曾经是 `stage_timeout_sec // 2`（=150s），C1 真实预演（任务 990170）
+    实测第 4 个子方向「生态成熟度与成本案例」正好在 150s 处被砍掉，
+    白丢 25% 的证据 —— 而并发方向的实际耗时（42.1/53.5/53.7s）说明 150s
+    并不是「典型耗时 + 余量」，而是**刚好卡在长尾里**。真实检索方向会
+    调多次工具（网页抓取 + PDF 解析），耗时方差很大，上限必须给足。
+    """
+    from src.agents import create_single_research_crew
+    from src.agents import _resolve_agent_config
+    from src.core.subdirections import derive_subdirections
+
+    subs = derive_subdirections(plan, topic)
+    names = [s["name"] for s in subs]
+    per_timeout = max(120, settings.stage_timeout_sec - 60)
     sem = asyncio.Semaphore(settings.max_parallel_researchers)
 
     async def run_one(idx: int, name: str) -> tuple[str, str]:
         async with sem:
             # 每个方向独立 LLM 实例，避免并发共享客户端状态
             crew = create_single_research_crew(
-                llm=_resolve_agent_config("Researcher"), index=idx, plan=plan
+                llm=_resolve_agent_config("Researcher"), index=idx, plan=plan,
+                topic=topic,
             )
             t0 = time.monotonic()
             # 与 _run_crew_safe 同理：让工具层（parse_pdf / read_image）能归属记账。
@@ -359,10 +383,19 @@ async def _run_research_fanout(task_id: int, plan: str) -> list[tuple[str, str]]
             token = set_current_task_id(task_id)
             try:
                 result = await asyncio.wait_for(crew.kickoff_async(), timeout=per_timeout)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{task_id}] 子方向 {name} 超时（>{per_timeout}s），跳过")
+            except asyncio.TimeoutError as e:
+                # 归因必须如实（C1 缺陷 D5）：3.11 起 `asyncio.TimeoutError` 与
+                # `TimeoutError` 是同一个类（实测 `is` → True），本层墙钟超时与
+                # crewai 内部超时**只能靠消息区分**（见 src/core/timeouts.py）。
+                # 990172 实测第 4 方向在 143.0s 被砍（< per_timeout 240s），
+                # 旧代码却记成 `reason="timeout"`、日志谎报「超时（>240s）」。
+                attr = classify_timeout(e, per_timeout)
+                if attr.internal:
+                    logger.warning(f"[{task_id}] 子方向 {name} 内部超时: {attr.detail}")
+                else:
+                    logger.warning(f"[{task_id}] 子方向 {name} 超时（>{per_timeout}s），跳过")
                 await _push_event(task_id, "research_direction_failed",
-                            {"direction": name, "reason": "timeout"})
+                            {"direction": name, "reason": attr.reason})
                 raise
             except Exception as e:
                 logger.warning(f"[{task_id}] 子方向 {name} 失败: {e}")

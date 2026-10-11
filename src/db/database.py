@@ -36,6 +36,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("tasks", "budget_limit_cny", "FLOAT"),
     # M2.5：每个阶段的模型计划（JSON 文本）
     ("tasks", "model_plan", "TEXT"),
+    # 闸门收敛：用户请求在下一个阶段边界暂停（1 = 已请求）
+    ("tasks", "pause_requested", "INTEGER DEFAULT 0"),
 ]
 
 # 已废弃、需要从老库删掉的列（M2.5-7 清理）。

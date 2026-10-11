@@ -12,6 +12,22 @@ from urllib.parse import urlparse
 HOST = "127.0.0.1"
 PORT = 8001
 
+# ── 从入参里抽取课题 / 子方向名（假数据不得写死具体课题）──
+# plan 阶段提示词里有「课题：$topic」行；research 阶段有
+# 「【检索任务 i/n — NAME】」。抽不到时返回通用措辞，绝不回落固定主题。
+_TOPIC_RE = re.compile(r"^课题[：:]\s*(.+?)\s*$", re.M)
+_RESEARCH_RE = re.compile(r"【(?:你的)?检索任务\s*\d+\s*/\s*\d+\s*—\s*(.+?)】")
+
+
+def _topic_of(text: str, default: str = "该调研课题") -> str:
+    m = _TOPIC_RE.search(text)
+    return m.group(1).strip() if m else default
+
+
+def _research_name(text: str) -> str:
+    m = _RESEARCH_RE.search(text)
+    return m.group(1).strip() if m else ""
+
 
 class MockLLMHandler(BaseHTTPRequestHandler):
 
@@ -131,103 +147,137 @@ class MockLLMHandler(BaseHTTPRequestHandler):
 
         因此这里用**只有该阶段指令才含有的措辞**做唯一标识，通用关键词
         只作为兜底（供其它工具用任意文本调用 mock 时使用）。
+
+        ★ 假数据**不得写死任何具体课题**（P0 硬编码缺陷）：以前这里把每个
+        阶段都填成 CrewAI / LangGraph / AutoGen 三个框架的演示内容，于是
+        mock 模式下不管调研什么课题，产出都是那三个框架，掩盖了真实问题。
+        现在正文一律从**入参里的课题**派生（plan 阶段抽「课题：」行，
+        research 阶段抽【检索任务 … — NAME】里的 NAME），抽不到就用通用措辞。
         """
         text_lower = text.lower()
 
         if is_json:
             return json.dumps({"result": "ok", "message": "模拟JSON响应"}, ensure_ascii=False)
 
+        topic = _topic_of(text)
+
         # ── 阶段唯一标识（按 STAGES 顺序，各标识只出现在该阶段的指令里）──
         # plan：planner.yaml "请制定一份结构化的多Agent协作调研计划"
         if "结构化的多Agent协作调研计划" in text:
-            return """## 调研计划
+            return f"""## 调研计划
 
-1. **框架概述**：对比 CrewAI、LangGraph、AutoGen 的核心理念与架构
-2. **协作模式**：分析三种框架的 Agent 协作机制（层级/图/对话）
-3. **工具生态**：对比内置工具、第三方集成能力
-4. **工程化**：评估部署、监控、错误处理等生产级能力
-5. **社区与生态**：对比 GitHub Stars、贡献者、文档质量
-6. **选型建议**：基于不同场景给出推荐"""
+**课题**：{topic}
 
-        # research：researcher.yaml "【检索任务 $index/$total — $name 框架】"
+### 1. 调研目标与核心问题
+- 明确「{topic}」的选型边界与关键决策点
+- 核心问题：在给定约束下，哪些候选对象最契合目标场景
+
+### 2. 关键对比维度
+- 能力覆盖、成熟度、集成成本、运维复杂度、社区活跃度
+
+### 3. 中英文检索关键词
+- `{topic}` / `{topic} comparison` / `{topic} benchmark`
+
+### 4. 目标信息来源
+- arXiv、官方文档、GitHub 仓库、技术博客
+
+### 5. 预期报告结构大纲
+- 背景与动机 → 对象概述 → 对比矩阵 → 差距分析 → 推荐方向 → 结论
+
+### 6. 检索子方向
+
+```json
+{{"subdirections": [
+  {{"name": "现状与能力", "desc": "检索 {topic} 各候选对象的能力边界与现状（中英文关键词）", "expected": "各对象的能力清单，含至少 3 条带引用标记的发现。"}},
+  {{"name": "对比与代价", "desc": "检索 {topic} 在集成成本、性能与运维复杂度上的对比证据", "expected": "对比结论，含至少 3 条带引用标记的发现。"}}
+]}}
+```"""
+
+        # research：researcher.yaml "【检索任务 $index/$total — $name】"
         if "【检索任务" in text or "【你的检索任务" in text:
-            return """## 检索结果
+            name = _research_name(text) or topic
+            return f"""## 检索结果：{name}
 
-### CrewAI
-- GitHub: https://github.com/crewAIInc/crewAI (25k+ Stars)
-- 核心理念：基于角色的多Agent协作框架，通过Crew组织Agent团队
-- 最新版本：1.15.25
+### 发现 1
+围绕「{name}」检索到若干一手材料，官方文档与仓库 README 给出了能力边界说明。
+- 来源：https://example.org/docs
+- 要点：能力范围、限制条件与适用场景
 
-### LangGraph
-- GitHub: https://github.com/langchain-ai/langgraph (8k+ Stars)
-- 核心理念：基于图的Agent工作流编排，支持循环与条件分支
-- 最新版本：0.2.x
+### 发现 2
+社区讨论与评测文章提供了实践反馈，可作为定性参考。
+- 来源：https://example.org/benchmark
+- 要点：与相邻方案的取舍
 
-### AutoGen
-- GitHub: https://github.com/microsoft/autogen (35k+ Stars)
-- 核心理念：多Agent对话框架，支持人机协作
-- 最新版本：0.8.x"""
+### 发现 3
+arXiv 预印本给出了方法论层面的分析（若检索到相关论文）。
+- 来源：https://arxiv.org/abs/0000.00000
+- 要点：评价维度与结论边界
+
+> 注：以上为 mock 模式下的占位内容，真实运行时会由检索工具填入实际来源。"""
 
         # analysis：analyst.yaml "请完成以下分析："
         if "请完成以下分析" in text:
-            return """## 对比矩阵
+            return f"""## 对比矩阵
 
-| 维度 | CrewAI | LangGraph | AutoGen |
-|------|--------|-----------|---------|
-| 架构模式 | 角色协作 | 有向图 | 对话式 |
-| 学习曲线 | 低 | 中 | 中 |
-| 灵活性 | 中 | 高 | 高 |
-| 工具集成 | 丰富 | 灵活 | 中等 |
-| 调试能力 | 中等 | 强 | 中等 |
-| 社区活跃 | 高 | 高 | 高 |
-| 生产就绪 | ✅ | ⚠️ | ⚠️ |
+围绕「{topic}」，按计划确定的维度整理如下（mock 占位）：
 
-**关键发现**：三种框架不是竞争关系，而是面向不同场景的设计选择。"""
+| 维度 | 候选 A | 候选 B |
+|------|--------|--------|
+| 能力覆盖 | 中 | 高 |
+| 成熟度 | 高 | 中 |
+| 集成成本 | 低 | 中 |
+| 运维复杂度 | 低 | 高 |
+
+**关键发现**：候选对象的差异主要体现在集成成本与运维复杂度上，需结合约束取舍。"""
 
         # critic：critic.yaml "请以红队身份，从以下角度提出质疑"
         if "请以红队身份" in text:
-            return """## 质疑与挑战
+            return f"""## 质疑与挑战
 
-1. **CrewAI 的真实协作深度**：角色分工是否真正带来了超出单Agent的增益？需要定量对比实验证据。
-2. **LangGraph 的工程复杂度**：图编排的灵活性是否以增加调试难度为代价？
-3. **AutoGen 的对话效率**：多Agent对话是否存在token浪费问题？
-4. **引用支撑不足**：以上对比结论需要更多生产环境的实际案例支撑。"""
+1. **证据强度**：关于「{topic}」的对比结论目前多为定性描述，缺少定量基准。
+2. **适用边界**：结论未说明在何种规模/约束下成立，存在过度外推风险。
+3. **时效性**：候选对象的版本迭代较快，结论可能随版本失效。
+4. **引用支撑不足**：部分论断没有落到具体来源，需要补充引用。"""
 
         # rebuttal：analyst.yaml rebuttal 块 "请**逐条回应**每一条质疑"
         if "逐条回应" in text:
-            return """## 对比分析（修订版）
+            return f"""## 对比分析（修订版）
 
 （此处为修订后的对比矩阵与结论，已在下方「质疑回应」中逐条表态。）
 
 ## 质疑回应
 
-质疑 1 → **接受**。CrewAI 的角色分工确实缺少定量证据，本报告已补充标注该结论为定性判断，不作为定量结论使用。
-质疑 2 → **部分接受**。LangGraph 的调试难度可通过内置的图可视化缓解，但确实高于 CrewAI，已修正表述。
-质疑 3 → **接受**。多Agent对话的 token 开销问题真实存在，已在报告中列为风险项。
-质疑 4 → **暂无证据支撑**。当前检索范围内没有生产环境案例，已明确标注该结论缺乏证据，不作推荐依据。"""
+质疑 1 → **接受**。定量基准确实缺失，已将相关结论标注为定性判断。
+质疑 2 → **部分接受**。已补充结论成立的规模与约束前提。
+质疑 3 → **接受**。已在报告中标注版本与检索时间，提示时效风险。
+质疑 4 → **暂无证据支撑**。当前检索范围内没有对应来源，已明确标注缺乏证据。"""
 
         # write：writer.yaml "请撰写一份完整的中文技术调研报告"
         if "请撰写一份完整的中文技术调研报告" in text:
-            return """## 多Agent框架选型调研报告
+            return f"""## {topic} 调研报告
 
 ### 摘要
-本报告对比了 CrewAI、LangGraph、AutoGen 三个主流多Agent框架，从架构设计、协作模式、工程化能力、社区生态等维度进行系统性评估。
+本报告围绕「{topic}」，从能力覆盖、成熟度、集成成本、运维复杂度与社区活跃度等维度进行系统性梳理与对比。
 
 ### 背景与动机
-随着 LLM 能力的快速提升，多Agent协作成为构建复杂AI应用的关键范式。选择合适的框架对项目成功至关重要。
+随着技术选型空间扩大，如何在本课题的约束下做出可辩护的选择，是本次调研要回答的核心问题。
+
+### 对象概述
+按调研计划确定的对象逐一介绍（mock 模式下为占位内容）。
 
 ### 对比分析
-...（详细对比见对比矩阵部分）
+详见对比矩阵部分。
 
-### 选型建议
-- **快速原型验证**：推荐 CrewAI
-- **复杂工作流编排**：推荐 LangGraph
-- **研究实验与对话式场景**：推荐 AutoGen
+### 差距与缺口分析
+现有材料以定性描述为主，缺少统一的定量基准。
 
-### 引用
-- CrewAI 官方文档
-- LangGraph GitHub 仓库
-- AutoGen 研究论文"""
+### 推荐方向
+结合约束条件给出分场景建议。
+
+### 结论与展望
+选型结论应随版本演进定期复核。
+
+> 注：以上为 mock 模式下的占位内容，真实运行时会由各阶段产出替换。"""
 
         # review：reviewer.yaml "请从以下维度审核报告质量"
         if "请从以下维度审核报告质量" in text:
@@ -237,91 +287,77 @@ class MockLLMHandler(BaseHTTPRequestHandler):
 
 | 维度 | 评分 |
 |------|------|
-| 引用完整性 | 4/5 |
+| 引用完整性 | 3/5 |
 | 逻辑连贯性 | 4/5 |
 | 结构完整性 | 5/5 |
 | 语言质量 | 4/5 |
 | 结论支撑 | 3/5 |
 
 **问题清单**：
-1. 「生产就绪」一行缺少引用支撑
-2. 选型建议未说明适用的团队规模
+1. 部分结论缺少引用支撑
+2. 推荐结论未说明适用边界
 
-**修改建议**：补充生产环境案例，明确推荐结论的适用边界。"""
+**修改建议**：补充可回溯引用，并明确结论成立的前提。"""
 
         # ── 通用关键词兜底（供任意文本调用 mock 时使用）──
         if "研究计划" in text or "plan" in text_lower:
-            return """## 调研计划
+            return f"""## 调研计划
 
-1. **框架概述**：对比 CrewAI、LangGraph、AutoGen 的核心理念与架构
-2. **协作模式**：分析三种框架的 Agent 协作机制（层级/图/对话）
-3. **工具生态**：对比内置工具、第三方集成能力
-4. **工程化**：评估部署、监控、错误处理等生产级能力
-5. **社区与生态**：对比 GitHub Stars、贡献者、文档质量
-6. **选型建议**：基于不同场景给出推荐"""
+**课题**：{topic}
+
+1. 调研目标与核心问题
+2. 关键对比维度
+3. 中英文检索关键词
+4. 目标信息来源
+5. 预期报告结构大纲
+6. 检索子方向
+
+```json
+{{"subdirections": [
+  {{"name": "现状与能力", "desc": "检索 {topic} 的现状", "expected": "含引用标记的能力清单。"}},
+  {{"name": "对比与代价", "desc": "检索 {topic} 的对比证据", "expected": "含引用标记的对比结论。"}}
+]}}
+```"""
 
         if "检索" in text or "search" in text_lower:
-            return """## 检索结果
+            name = _research_name(text) or topic
+            return f"""## 检索结果：{name}
 
-### CrewAI
-- GitHub: https://github.com/crewAIInc/crewAI (25k+ Stars)
-- 核心理念：基于角色的多Agent协作框架，通过Crew组织Agent团队
-- 最新版本：1.15.25
+- 来源：https://example.org/docs
+- 要点：围绕「{name}」的能力范围与限制
 
-### LangGraph
-- GitHub: https://github.com/langchain-ai/langgraph (8k+ Stars)
-- 核心理念：基于图的Agent工作流编排，支持循环与条件分支
-- 最新版本：0.2.x
-
-### AutoGen
-- GitHub: https://github.com/microsoft/autogen (35k+ Stars)
-- 核心理念：多Agent对话框架，支持人机协作
-- 最新版本：0.8.x"""
+> 注：以上为 mock 模式下的占位内容。"""
 
         if "对比" in text or "compare" in text_lower:
-            return """## 对比矩阵
+            return f"""## 对比矩阵
 
-| 维度 | CrewAI | LangGraph | AutoGen |
-|------|--------|-----------|---------|
-| 架构模式 | 角色协作 | 有向图 | 对话式 |
-| 学习曲线 | 低 | 中 | 中 |
-| 灵活性 | 中 | 高 | 高 |
-| 工具集成 | 丰富 | 灵活 | 中等 |
-| 调试能力 | 中等 | 强 | 中等 |
-| 社区活跃 | 高 | 高 | 高 |
-| 生产就绪 | ✅ | ⚠️ | ⚠️ |
+围绕「{topic}」按计划维度整理的占位对比表。
 
-**关键发现**：三种框架不是竞争关系，而是面向不同场景的设计选择。"""
+**关键发现**：差异主要落在集成成本与运维复杂度上。"""
 
         if "质疑" in text or "critic" in text_lower:
-            return """## 质疑与挑战
+            return f"""## 质疑与挑战
 
-1. **CrewAI 的真实协作深度**：角色分工是否真正带来了超出单Agent的增益？需要定量对比实验证据。
-2. **LangGraph 的工程复杂度**：图编排的灵活性是否以增加调试难度为代价？
-3. **AutoGen 的对话效率**：多Agent对话是否存在token浪费问题？
-4. **引用支撑不足**：以上对比结论需要更多生产环境的实际案例支撑。"""
+1. **证据强度**：关于「{topic}」的结论缺少定量基准。
+2. **适用边界**：未说明结论在何种约束下成立。
+3. **引用支撑不足**：部分论断未落到具体来源。"""
 
         if "报告" in text or "write" in text_lower or "撰写" in text:
-            return """## 多Agent框架选型调研报告
+            return f"""## {topic} 调研报告
 
 ### 摘要
-本报告对比了 CrewAI、LangGraph、AutoGen 三个主流多Agent框架，从架构设计、协作模式、工程化能力、社区生态等维度进行系统性评估。
+本报告围绕「{topic}」展开系统性梳理与对比。
 
 ### 背景与动机
-随着 LLM 能力的快速提升，多Agent协作成为构建复杂AI应用的关键范式。选择合适的框架对项目成功至关重要。
+说明本课题的选型背景与决策目标。
 
 ### 对比分析
-...（详细对比见对比矩阵部分）
+详见对比矩阵部分。
 
-### 选型建议
-- **快速原型验证**：推荐 CrewAI
-- **复杂工作流编排**：推荐 LangGraph
-- **研究实验与对话式场景**：推荐 AutoGen
+### 结论与展望
+结论应随版本演进定期复核。
 
-### 引用
-- CrewAI 官方文档
-- LangGraph GitHub 仓库
-- AutoGen 研究论文"""
+> 注：以上为 mock 模式下的占位内容。"""
 
         # 默认回复
         return f"Mock LLM ({model}) 已收到您的输入。当前为模拟模式，返回预设内容以供开发调试。"

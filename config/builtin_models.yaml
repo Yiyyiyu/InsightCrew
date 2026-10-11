@@ -21,8 +21,14 @@
 #   max_tokens       默认最大输出 token
 #   temperature      默认温度
 #   supports_vision  是否支持读图（决定它能否出现在「读图模型」下拉里）
-#   disable_thinking 关闭思考模式（思考型视觉模型会把 max_tokens 耗在
-#                    reasoning_tokens 上，导致 content 返回空串）
+#   disable_thinking 关闭思考模式。★ 文本与视觉链路都生效：
+#                    - 文本（deepseek-v4-pro/flash）：思考模型把
+#                      reasoning_tokens 与正文共享 max_tokens，实测 8192
+#                      输出预算可能产出 0 个可用字符（HTTP 200、静默故障），
+#                      且污染所有下游阶段 → 默认关闭。
+#                    - 视觉（glm-4v-flash）：思考把预算耗光导致 content 空串。
+#                    注入方式：文本走 crewai.LLM 的 additional_params 顶层
+#                    字段 `thinking`，视觉走 litellm 的 extra_body。
 #   price_in/out     单价（人民币元 / 百万 token）；0 = 只记 token 不计费
 #   fallback         可选，读图失败时回落的另一个内置档 id
 
@@ -34,7 +40,8 @@ builtin_models:
     max_tokens: 4096
     temperature: 0.3
     supports_vision: true
-    disable_thinking: false
+    # ★ 思考模型：不关则 reasoning 吃光 max_tokens（C1 实测，见文件头说明）
+    disable_thinking: true
     price_in: 0.5
     price_out: 2.0
 
@@ -45,7 +52,8 @@ builtin_models:
     max_tokens: 8192
     temperature: 0.2
     supports_vision: false
-    disable_thinking: false
+    # ★ 思考模型：实测 8192 全被 reasoning 吃掉、正文 0 字符（C1 实测）
+    disable_thinking: true
     price_in: 4.0
     price_out: 12.0
 
@@ -103,8 +111,21 @@ default_plan:
 
 # ── per-Agent 生成参数覆盖（与档位无关，按角色生效）──
 overrides:
+  # Writer 产出 7 章节完整报告，是全场最长的单个输出。
+  # 实测（任务 990171）：max_tokens=8000 被精确触顶，report_draft 停在
+  # 「### 7.1 核心结论 1. …pgvector（」半句上 —— 报告尾巴被砍掉。
+  # DeepSeek 实测接受 max_tokens ≥ 200000，8000 纯属我们自己的预算设定过紧。
+  # 提到 16000：按 deepseek-flash 输出价 ¥2.0/百万 token 计，多花的钱 < ¥0.02。
   Writer:
-    max_tokens: 8000
+    max_tokens: 16000
     temperature: 0.4
+  # Analyst 承担两个阶段：analysis（对比分析）与 rebuttal（质疑回应）。
+  # rebuttal 要「逐条回应 + 重写完整分析 + 末尾追加质疑回应小节」，输出量
+  # 接近 Writer：实测（任务 990173）rebuttal_output 15318 字符、尾部停在
+  # 「### 质疑 9」半句上（`…过滤和向量搜索可在一次 API 调用`），而该笔调用
+  # `out=8192` 精确触顶 deepseek-pro 档位上限 → 第 9 条之后全丢。
+  # 提到 16000：按 deepseek-pro 输出价 ¥12/百万 token 计，多花的钱 < ¥0.1。
+  Analyst:
+    max_tokens: 16000
   Critic:
     temperature: 0.7

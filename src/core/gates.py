@@ -16,6 +16,7 @@ from src.db.models import Task, HumanReview, Report
 
 from src.core.events import _push_event
 from src.core.queue import (
+    GATE_STAGES,
     STAGES,
     STAGE_LABELS,
     _enqueue_stage,
@@ -33,6 +34,7 @@ async def _create_gate(task_id: int, stage: str):
         task = await session.get(Task, task_id)
         if task:
             task.gate_status = "pending"
+            task.pause_requested = 0
             session.add(HumanReview(
                 task_id=task_id,
                 gate_name=gate_name,
@@ -46,6 +48,77 @@ async def _create_gate(task_id: int, stage: str):
         "gate_name": gate_name,
     })
     logger.info(f"[{task_id}] 阶段 {stage} 完成，等待人工确认 (gate: {gate_name})")
+
+
+async def advance_stage(task_id: int, stage: str):
+    """阶段执行完成后的分流：**建闸门停下，还是自动推进下一阶段**。
+
+    闸门收敛（用户 m18246/m18259 拍板）：只有 `GATE_STAGES` 里的阶段
+    （plan / research / review）才停下来等人；其余阶段（analysis / critic /
+    rebuttal / write）是「机器能自己判断的中间加工」，直接在 worker 内推进。
+
+    自动推进分支刻意**不调** `_ensure_executable()`：我们此刻就在 worker
+    进程里，worker 当然是活的，再体检一次只是多余的一次 Redis 往返。
+
+    例外：`tasks.pause_requested=1` 时，任何阶段边界都停成闸门（前端
+    「暂停」按钮的落地方式 —— 接口留宽，默认路径收窄）。
+    """
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        if not task:
+            return
+        paused = bool(task.pause_requested)
+
+    # ① 闸门阶段，或用户请求在下一个边界暂停 → 建闸门
+    if stage in GATE_STAGES or paused:
+        await _create_gate(task_id, stage)
+        if paused:
+            logger.info(f"[{task_id}] 用户请求暂停，已在阶段 {stage} 边界建闸")
+        return
+
+    # ② 自动推进到下一阶段
+    try:
+        idx = STAGES.index(stage)
+    except ValueError:
+        idx = -1
+    if idx < 0 or idx >= len(STAGES) - 1:
+        # 末阶段且不是闸门阶段（当前配置下不会发生，防御性收尾）
+        await _finish_pipeline(task_id)
+        return
+
+    next_stage = STAGES[idx + 1]
+    await _update_task_status(task_id, "running")
+    try:
+        await _enqueue_stage(task_id, next_stage)
+        await _mark_exec_path(task_id, "arq")
+    except ServiceUnavailableError:
+        # 入队失败不能把任务丢在 running 里无人接手。在这里就地建闸门
+        # 兜住：用户稍后 approve 同一个闸门即可重投下一阶段（自愈）。
+        logger.warning(
+            f"[{task_id}] 阶段 {stage} 完成但 {next_stage} 入队失败，"
+            f"已在阶段 {stage} 建闸兜住"
+        )
+        await _create_gate(task_id, stage)
+
+
+async def pause_pipeline(task_id: int) -> bool:
+    """请求在**下一个阶段边界**暂停（不是立刻打断正在跑的阶段）。
+
+    立刻打断会让当前阶段的 token 白花、中间产物半成品；在边界停下则
+    当前阶段的成果完整保留，下一个阶段等人放行。落地方式：置
+    `pause_requested=1`，worker 在 `advance_stage` 时读到它就建闸门。
+    """
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        if not task or task.status in ("completed", "failed", "aborted"):
+            return False
+        task.pause_requested = 1
+        await session.commit()
+        stage = task.current_stage
+
+    await _push_event(task_id, "pause_requested", {"stage": stage})
+    logger.info(f"[{task_id}] 已请求暂停：阶段 {stage} 结束后建闸")
+    return True
 
 
 async def _run_stage(task_id: int, stage: str):

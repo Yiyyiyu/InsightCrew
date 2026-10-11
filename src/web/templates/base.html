@@ -33,6 +33,10 @@
         @media (max-width: 900px) { .ic-grid { grid-template-columns: 1fr; } }
         pre.ic-md { white-space: pre-wrap; word-wrap: break-word; font-size: .87rem;
                     background: #fafafa; padding: .9rem; border-radius: 6px; }
+        /* 闸门等待时可编辑的中间产物（用户 m18267） */
+        pre.ic-md.ic-editable { background: #fff; border: 1px dashed var(--ic-warn);
+                                cursor: text; }
+        pre.ic-md.ic-editable:focus { outline: 2px solid var(--ic-warn); outline-offset: 1px; }
         .ic-gatebar { border: 1px solid var(--ic-warn); background: #fffaf0;
                       border-radius: 8px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
         .ic-gatebar h4 { margin: 0 0 .5rem 0; color: var(--ic-warn); }

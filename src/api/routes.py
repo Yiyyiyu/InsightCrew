@@ -24,7 +24,9 @@ from src.core.orchestrator import (
     approve_gate,
     reject_gate,
     abort_pipeline,
+    pause_pipeline,
     event_stream,
+    _push_event,
 )
 from src.core.ratelimit import RateLimitExceeded, check_rate_limit, client_ip
 from src.db.database import async_session
@@ -108,6 +110,24 @@ class GateRequest(BaseModel):
     comment: str = ""
 
 
+# ── 中间产物编辑（用户 m18267：web 端要能改内容）──
+# 键 = `_load_intermediate` 的 key，也是前端 `<pre id="ic-p-*">` 的 data 来源。
+# 值与阶段一一对应，前端据此判断「这一段属于哪个阶段」。
+ARTIFACT_KEYS = {
+    "plan_output": "plan",
+    "analysis_output": "analysis",
+    "critic_output": "critic",
+    "rebuttal_output": "rebuttal",
+    "report_draft": "write",
+    "review_output": "review",
+}
+
+
+class ArtifactRequest(BaseModel):
+    value: str
+    comment: str = ""
+
+
 class TaskStatusResponse(BaseModel):
     task_id: int
     topic: str
@@ -128,6 +148,7 @@ class TaskStatusResponse(BaseModel):
     dimensions: str = ""
     constraints: str = ""
     model_plan: dict[str, str] = {}
+    pause_requested: bool = False
 
 
 class TaskSummary(BaseModel):
@@ -411,6 +432,71 @@ async def reject(
         raise HTTPException(status_code=400, detail="无法驳回闸门")
     logger.info(f"用户 {ctx['user']['username']} 驳回了闸门 {req.gate_name}，备注: {req.comment}")
     return {"status": "rejected"}
+
+
+@router.put("/research/{task_id}/artifact/{key}", summary="编辑中间产物")
+async def edit_artifact(
+    key: str,
+    req: ArtifactRequest,
+    ctx: dict = Depends(get_owned_task),
+):
+    """人工修正某个中间产物（用户 m18267：前端要能改内容，不只是看）。
+
+    为什么只能在闸门处改：闸门之外阶段正在跑，此时改产物要么被下一步
+    覆盖、要么让下游拿到自相矛盾的前后文。闸门处是**唯一的静默点** ——
+    任务停着、下一步还没入队，改完 approve 就直接生效。
+
+    实现：写一条新的 `intermediate_<key>` 事件（`_save_intermediate` 本就
+    取 `id.desc()` 最新一条），因此**不改历史、可追溯**：旧值仍在事件流里。
+    """
+    task = ctx["task"]
+    task_id = task.id
+
+    if key not in ARTIFACT_KEYS:
+        raise HTTPException(status_code=400, detail=f"未知产物：{key}")
+    if task.status != "running" or task.gate_status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="只能在闸门等待确认时编辑中间产物（阶段运行中编辑会被覆盖）",
+        )
+
+    from src.core.artifacts import _load_intermediate, _save_intermediate
+
+    old = await _load_intermediate(task_id, key)
+    if old is None:
+        raise HTTPException(status_code=404, detail=f"产物 {key} 尚未生成")
+
+    await _save_intermediate(task_id, key, req.value)
+    await _push_event(task_id, "artifact_edited", {
+        "key": key,
+        "stage": ARTIFACT_KEYS[key],
+        "comment": req.comment,
+        "old_len": len(old),
+        "new_len": len(req.value),
+    })
+    logger.info(
+        f"用户 {ctx['user']['username']} 编辑了任务 {task_id} 的产物 {key}"
+        f"（{len(old)} → {len(req.value)} 字符）"
+    )
+    return {"status": "saved", "key": key, "length": len(req.value)}
+
+
+@router.post("/research/{task_id}/pause", summary="请求在下一个阶段边界暂停")
+async def pause(
+    ctx: dict = Depends(get_owned_task),
+):
+    """把「下一个阶段边界」临时变成一道闸门（用户 m18259：保留及时修正的接口）。
+
+    不是立刻打断正在跑的阶段 —— 那样当前阶段的 token 白花、中间产物半成品。
+    请求在边界停下，当前阶段成果完整保留，下一个阶段等人放行。
+    默认路径仍是 3 道闸门（plan / research / review），本接口把接口留宽。
+    """
+    task_id = ctx["task"].id
+    ok = await pause_pipeline(task_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="任务已结束，无法暂停")
+    logger.info(f"用户 {ctx['user']['username']} 请求暂停任务 {task_id}")
+    return {"status": "pause_requested"}
 
 
 @router.post("/research/{task_id}/abort", summary="中止任务")

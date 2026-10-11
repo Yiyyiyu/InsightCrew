@@ -38,8 +38,8 @@ from src.core import pipeline as _pipeline
 
 # ── 常量 ──
 from src.core.events import TERMINAL_EVENTS
-from src.core.queue import STAGES, STAGE_LABELS
-from src.core.critique import _CRITIQUE_ITEM_RE, _REBUTTAL_SECTION_RE
+from src.core.queue import STAGES, STAGE_LABELS, GATE_STAGES
+from src.core.critique import _count_critique_items, _REBUTTAL_SECTION_RE
 from src.core.pipeline import STALE_FACTOR
 
 # ── 事件通道 ──
@@ -89,7 +89,9 @@ from src.core.gates import (
     _run_stage,
     _update_task_status,
     abort_pipeline,
+    advance_stage,
     approve_gate,
+    pause_pipeline,
     reject_gate,
 )
 

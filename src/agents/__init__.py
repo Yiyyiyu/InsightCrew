@@ -56,19 +56,24 @@ def create_plan_crew(topic: str, dimensions: str = "", constraints: str = "") ->
     )
 
 
-def create_research_crew(plan: str) -> Crew:
-    """阶段2: 检索取证 Crew（3 个检索任务，串行执行）
+def create_research_crew(plan: str, topic: str = "") -> Crew:
+    """阶段2: 检索取证 Crew（按计划派生的子方向，串行执行）
 
     ★ 实际编排不走这里：research 阶段由 orchestrator 调
     `create_single_research_crew` 为每个子方向各建一个独立 Crew，
     再用 asyncio.gather 并发 + 各自硬超时（单方向失败可隔离）。
     本函数保留给串行/调试场景。
 
+    ★ 子方向由 `plan` 动态派生（P0 硬编码缺陷的修法），数量不定，
+    所以 agents 与 tasks 必须用**同一个 plan** 派生，否则会数量不匹配。
+
     注意：每个任务必须绑**独立**的 Researcher 实例——CrewAI 一个 Agent 只持有
     一个 Executor，共享实例并发会抛 "Executor is already running"。
     """
-    agents = create_research_agents(llm_factory=lambda: _resolve_agent_config("Researcher"))
-    tasks = create_research_tasks(agents, plan)
+    agents = create_research_agents(
+        llm_factory=lambda: _resolve_agent_config("Researcher"), plan=plan, topic=topic
+    )
+    tasks = create_research_tasks(agents, plan, topic=topic)
     return Crew(
         agents=agents,
         tasks=tasks,

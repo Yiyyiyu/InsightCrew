@@ -38,6 +38,10 @@ class Task(Base):
     # 7 个键 = 6 个 Agent 角色 + 1 个读图档。NULL 表示未指定（用默认计划）。
     # ★ M2.5-7 删除了旧的 `model_strategy` 列（同构/异构开关，已被本字段取代）。
     model_plan = Column(Text, nullable=True)
+    # ── 暂停请求（闸门收敛配套：任意阶段边界可临时变成闸门）──
+    # 1 = 用户请求在**下一个阶段边界**暂停（不是立刻打断）。worker 在
+    # `advance_stage` 读到它就建闸门；建闸时清零。见 `src/core/gates.py::pause_pipeline`。
+    pause_requested = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

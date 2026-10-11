@@ -21,13 +21,14 @@ REDIS_SETTINGS = RedisSettings.from_dsn(settings.redis_url)
 async def run_pipeline_stage(ctx, task_id: int, stage: str):
     """arq 任务：执行单个调研阶段（Plan / Research / Analysis / Critic / Write / Review）
 
-    执行完成后自动创建 HITL 闸门等待人工审批。
+    执行完成后由 `advance_stage` 分流（闸门收敛，用户 m18246/m18259）：
+    闸门阶段（plan / research / review）建闸等人；其余阶段直接入队下一阶段。
 
     ★ 失败必须落状态：execute_stage 抛错（阶段超时、预算熔断
     BudgetExceededError、LLM 报错等）时，这里要把任务标成 failed，
     否则任务会永远停在 running，前端一直转圈、闸门也不会出现。
     """
-    from src.core.orchestrator import execute_stage, _create_gate, _update_task_status
+    from src.core.orchestrator import execute_stage, advance_stage, _update_task_status
 
     try:
         await execute_stage(task_id, stage)
@@ -40,7 +41,7 @@ async def run_pipeline_stage(ctx, task_id: int, stage: str):
         # 重试只会重复烧钱。状态已落库、事件已推送，交给人工处置。
         return
 
-    await _create_gate(task_id, stage)
+    await advance_stage(task_id, stage)
 
 
 async def reap_stale_tasks(ctx):

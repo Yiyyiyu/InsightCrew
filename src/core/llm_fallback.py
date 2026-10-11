@@ -83,6 +83,28 @@ def _llm_kwargs(route, timeout: int) -> dict[str, Any]:
     """把 ``ModelRoute`` 翻成 ``crewai.LLM`` 的构造参数。
 
     ★ 注意 ``base_url`` 而不是 ``api_base``：crewai 的 LLM 工厂用的是前者。
+
+    ★ ``thinking={"type": "disabled"}` 的必要性（C1 真实预演实测，P0）：
+
+    DeepSeek 的 ``deepseek-v4-pro`` / ``deepseek-flash`` 都是**思考模型**，
+    ``reasoning_tokens`` 与正文**共享** ``max_tokens`` 预算。真实任务
+    990170 上 critic 声明 8192 输出、实测 ``completion_tokens=8192`` 而
+    ``reasoning_tokens=8192``、``content`` 为空串 —— 也就是说声明的输出预算
+    可能产出 **0 个可用字符**，而故障是静默的（HTTP 200），污染所有下游阶段。
+    关掉思考后同一提示词实测 ``finish_reason=stop``、正文完整，且约便宜 3 倍。
+
+    注入通道（★ 踩坑，务必用 ``extra_body`` 而不是 ``thinking``）：
+    ``crewai.LLM`` 的未知 kwarg 会被 ``base_llm.py`` 的 ``_validate_init_fields``
+    收进 ``additional_params``，再由 ``completion.py::_prepare_completion_params``
+    (``:2084 params.update(self.additional_params)``) 原样并入 params —— 而
+    params 最终是 ``openai.chat.completions.create(**params)`` 的关键字参数，
+    **SDK 不认识的键会直接抛 ``TypeError: Completions.create() got an
+    unexpected keyword argument 'thinking'``**（实测踩过这个坑）。
+    正确做法是包在 ``extra_body`` 里 —— 它是 OpenAI SDK 的官方逃生舱，
+    SDK 会把它展开成请求体顶层字段，既不被拒也不进签名。
+    与视觉链路 ``src/tools/vision.py:132-133`` 的 ``extra_body`` 写法一致。
+    ``enable_thinking: false`` 与 ``reasoning_effort="minimal"`` 均**无效**，
+    只有 ``{"thinking": {"type": "disabled"}}`` 能彻底关掉。
     """
     kwargs: dict[str, Any] = {
         "model": route.model_id,
@@ -93,6 +115,8 @@ def _llm_kwargs(route, timeout: int) -> dict[str, Any]:
     }
     if route.api_base:
         kwargs["base_url"] = route.api_base
+    if getattr(route, "disable_thinking", False):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     return kwargs
 
 

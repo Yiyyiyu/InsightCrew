@@ -238,6 +238,8 @@ async def get_task_status(task_id: int) -> Optional[dict]:
         "constraints": task.constraints or "",
         # 模型分配表（M2.5）：回显用户逐角色选定的模型，前端据此渲染
         "model_plan": _deserialize_model_plan(task.model_plan),
+        # 闸门收敛配套：前端「暂停」按钮的待生效状态
+        "pause_requested": bool(task.pause_requested),
     }
 
 

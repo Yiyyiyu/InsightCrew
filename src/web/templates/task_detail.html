@@ -49,6 +49,8 @@
        href="#">查看最终报告</a>
     <a id="ic-evidence-link" role="button" class="outline secondary" style="width:auto;margin:0;"
        href="/tasks/{{ task.id }}/evidence">证据台账</a>
+    <button id="ic-pause" class="outline secondary" style="width:auto;margin:0;"
+            title="在下一个阶段边界停下（当前阶段先跑完），随后可确认或打回">请求暂停</button>
     <button id="ic-abort2" class="outline secondary" style="width:auto;margin:0;">中止任务</button>
 </div>
 
@@ -63,32 +65,35 @@
         </div>
     </div>
 
-    <!-- 右：中间产物 -->
+    <!-- 右：中间产物（闸门处可直接编辑，用户 m18267） -->
     <div>
-        <h3 style="font-size:1.05rem;">中间产物</h3>
+        <h3 style="font-size:1.05rem;">中间产物
+            <span id="ic-edit-hint" class="ic-muted"
+                  style="font-size:.75rem;font-weight:400;">（闸门等待时可编辑）</span>
+        </h3>
         <details class="ic-card" open>
             <summary>调研大纲（plan）</summary>
-            <pre class="ic-md" id="ic-p-plan">—</pre>
+            <pre class="ic-md" id="ic-p-plan" data-key="plan_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>分析结论（analysis）</summary>
-            <pre class="ic-md" id="ic-p-analysis">—</pre>
+            <pre class="ic-md" id="ic-p-analysis" data-key="analysis_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>质疑意见（critic）</summary>
-            <pre class="ic-md" id="ic-p-critic">—</pre>
+            <pre class="ic-md" id="ic-p-critic" data-key="critic_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>质疑回应（rebuttal）</summary>
-            <pre class="ic-md" id="ic-p-rebuttal">—</pre>
+            <pre class="ic-md" id="ic-p-rebuttal" data-key="rebuttal_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>报告草稿（write）</summary>
-            <pre class="ic-md" id="ic-p-report">—</pre>
+            <pre class="ic-md" id="ic-p-report" data-key="report_draft">—</pre>
         </details>
         <details class="ic-card">
             <summary>评审意见（review）</summary>
-            <pre class="ic-md" id="ic-p-review">—</pre>
+            <pre class="ic-md" id="ic-p-review" data-key="review_output">—</pre>
         </details>
     </div>
 </div>
@@ -148,13 +153,27 @@ function renderStatus(s) {
         rl.style.display = 'none';
     }
 
-    // 中间产物
+    // 中间产物（闸门处可编辑）
     if (s.plan_output) document.getElementById('ic-p-plan').textContent = s.plan_output;
     if (s.analysis_output) document.getElementById('ic-p-analysis').textContent = s.analysis_output;
     if (s.critic_output) document.getElementById('ic-p-critic').textContent = s.critic_output;
     if (s.rebuttal_output) document.getElementById('ic-p-rebuttal').textContent = s.rebuttal_output;
     if (s.report_draft) document.getElementById('ic-p-report').textContent = s.report_draft;
     if (s.review_output) document.getElementById('ic-p-review').textContent = s.review_output;
+
+    // 可编辑性跟着闸门走：只有任务停着等确认时才允许改（见后端 PUT /artifact）
+    window.__editable = !!(s.pending_gate && s.status === 'running');
+    document.getElementById('ic-edit-hint').textContent = window.__editable
+        ? '（点击内容即可编辑，改完自动保存）'
+        : '（闸门等待时可编辑）';
+    document.querySelectorAll('.ic-md[data-key]').forEach(el => {
+        el.classList.toggle('ic-editable', window.__editable);
+        el.setAttribute('contenteditable', window.__editable ? 'true' : 'false');
+    });
+    // 暂停按钮：只在跑着、且还没请求暂停时可用
+    const pb = document.getElementById('ic-pause');
+    pb.disabled = !(s.status === 'running') || !!s.pause_requested;
+    pb.textContent = s.pause_requested ? '已请求暂停…' : '请求暂停';
 }
 
 async function refreshStatus() {
@@ -175,6 +194,10 @@ const HANDLERS = {
     gate_pending: d => addEvent('gate', `等待人工确认：${d.label || d.stage}`, ''),
     gate_approved: d => addEvent('done', '人工确认通过', d.gate || ''),
     gate_rejected: d => addEvent('gate', '人工打回重做', d.comment || ''),
+    artifact_edited: d => addEvent('', `人工修正中间产物：${d.key}`,
+        `${d.old_len} → ${d.new_len} 字符${d.comment ? ' · ' + d.comment : ''}`),
+    pause_requested: d => addEvent('gate', '已请求暂停',
+        `将在「${STAGE_LABELS[d.stage] || d.stage}」阶段结束后停下`),
     research_fanout: d => addEvent('', '并行调研展开',
         (d.directions || []).map(x => `${x.name}(${x.chars}字)`).join('、')),
     research_direction_done: d => addEvent('', `子方向完成：${d.direction}`,
@@ -266,6 +289,48 @@ async function abortTask() {
 }
 document.getElementById('ic-abort').addEventListener('click', abortTask);
 document.getElementById('ic-abort2').addEventListener('click', abortTask);
+
+// ── 暂停请求（把下一个阶段边界临时变成闸门）──
+document.getElementById('ic-pause').addEventListener('click', async () => {
+    if (!confirm('请求暂停？当前阶段会先跑完，在下一个阶段边界停下等你确认。')) return;
+    try {
+        const r = await fetch('/research/' + TASK_ID + '/pause', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { icToast(d.detail || '暂停请求失败'); return; }
+        icToast('已请求暂停，当前阶段结束后停下');
+        refreshStatus();
+    } catch (e) { icToast('网络错误：' + e); }
+});
+
+// ── 中间产物编辑（用户 m18267：web 端要能改内容）──
+// 用 contenteditable + blur 保存：不引入编辑器依赖，改动小、够用。
+// 只有闸门等待时才可编辑（后端 PUT /artifact 会再校验一次，前端 disabled
+// 只是体验，不是安全边界）。
+document.querySelectorAll('.ic-md[data-key]').forEach(el => {
+    let __before = '';
+    el.addEventListener('focus', () => { __before = el.textContent; });
+    el.addEventListener('blur', async () => {
+        if (!window.__editable) return;
+        const value = el.textContent;
+        if (value === __before) return;          // 没改就不发请求
+        const key = el.dataset.key;
+        try {
+            const r = await fetch('/research/' + TASK_ID + '/artifact/' + key, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { icToast(d.detail || '保存失败'); el.textContent = __before; return; }
+            __before = value;
+            icToast('已保存（' + value.length + ' 字符）');
+        } catch (e) { icToast('网络错误：' + e); el.textContent = __before; }
+    });
+    // Ctrl+Enter 也提交一次，省得用户必须点空白处失焦
+    el.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); el.blur(); }
+    });
+});
 
 // ── 初始加载 ──
 (async () => {

@@ -101,11 +101,45 @@ def _redirect_to_dev_home() -> None:
     os.environ.setdefault("CREWAI_STORAGE_DIR", _PROJECT_ROOT.name)
 
 
+def _force_utf8_streams() -> None:
+    """把 stdout/stderr 切成 UTF-8，避免 CrewAI 打印 emoji 时打死整个 crew。
+
+    ## 背景（C1 缺陷 D8）
+
+    Windows 控制台默认 GBK（实测 `cp936`，`locale.getpreferredencoding(False)`
+    也是 cp936）。CrewAI 的 `crewai.flow.runtime` 工具监听器会**直接往 stdout
+    打 emoji**（✨ 📋 🔧 等）以及 LLM 输出里的任意 Unicode 字符。`print()` 在
+    GBK 流上编码失败会抛 `UnicodeEncodeError`，而该异常是从监听器里冒出来的，
+    **直接终止整个 crew**：
+
+        16:59:30 [crewai.flow.runtime] ERROR: Error executing listener
+        execute_native_tool: 'gbk' codec can't encode character '\U0001f426'
+
+    实测任务 990175 因此**静默丢掉 2/4 个检索方向**（「运维实践与生产经验」被
+    一个 🐦 打死、「性能基准与实测数据」被 U+2002 EN SPACE 打死），报告照常
+    生成、引用校验照常全绿——因为校验只查「引用的 chunk 是否存在」，不查
+    「证据是不是只搜了一半」。
+
+    `errors="replace"` 是关键：即使仍有无法编码的字符，也只是显示成 `?`，
+    绝不再抛异常。Linux/Docker（默认 UTF-8）本就不受影响，此处是幂等的。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            # 只有 io.TextIOWrapper 有 reconfigure；pytest 捕获对象等没有，
+            # 没有就跳过（那种场景下也不需要，捕获器本身就是 UTF-8 安全的）。
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def ensure_crewai_environment() -> None:
     """幂等入口：确保 CrewAI 能在当前沙箱下正常 import。"""
     if os.environ.get(_ENV_MARKER) == "1":
         return
     os.environ[_ENV_MARKER] = "1"
+
+    # 必须在 `import crewai` 之前：CrewAI 的监听器会往 stdout 打 emoji。
+    _force_utf8_streams()
 
     # 关闭 CrewAI 遥测/tracing：否则首次执行会弹出
     # "Share this execution trace with CrewAI? [y/N] (20s timeout)" 交互提示。
