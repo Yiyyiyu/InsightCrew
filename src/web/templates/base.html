@@ -5,10 +5,124 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}InsightCrew{% endblock %}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pico.css@2/css/pico.min.css">
+    <style>
+        :root { --ic-accent: #2b6cb0; --ic-ok: #2f855a; --ic-warn: #b7791f; --ic-err: #c53030; }
+        nav.ic-nav { border-bottom: 1px solid var(--pico-muted-border-color); margin-bottom: 1.5rem; }
+        nav.ic-nav ul { align-items: center; }
+        .ic-brand { font-weight: 700; font-size: 1.15rem; color: var(--ic-accent); }
+        .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+                 font-size: .78rem; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+        .badge-pending { background: #edf2f7; color: #4a5568; }
+        .badge-running { background: #ebf8ff; color: var(--ic-accent); }
+        .badge-done    { background: #f0fff4; color: var(--ic-ok); }
+        .badge-failed  { background: #fff5f5; color: var(--ic-err); }
+        .badge-aborted { background: #faf5ff; color: #6b46c1; }
+        .badge-gate    { background: #fffaf0; color: var(--ic-warn); }
+        .ic-muted { color: var(--pico-muted-color); font-size: .88rem; }
+        .ic-cost { font-variant-numeric: tabular-nums; font-weight: 600; }
+        .ic-card { border: 1px solid var(--pico-muted-border-color); border-radius: 8px;
+                   padding: 1rem 1.1rem; margin-bottom: .9rem; }
+        .ic-timeline { max-height: 62vh; overflow-y: auto; padding-right: .4rem; }
+        .ic-ev { border-left: 3px solid var(--pico-muted-border-color); padding: .35rem .7rem;
+                 margin-bottom: .5rem; font-size: .88rem; background: #fafafa; border-radius: 0 6px 6px 0; }
+        .ic-ev.gate { border-left-color: var(--ic-warn); background: #fffaf0; }
+        .ic-ev.done { border-left-color: var(--ic-ok); }
+        .ic-ev.err  { border-left-color: var(--ic-err); background: #fff5f5; }
+        .ic-ev .t { font-weight: 600; }
+        .ic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+        @media (max-width: 900px) { .ic-grid { grid-template-columns: 1fr; } }
+        pre.ic-md { white-space: pre-wrap; word-wrap: break-word; font-size: .87rem;
+                    background: #fafafa; padding: .9rem; border-radius: 6px; }
+        .ic-gatebar { border: 1px solid var(--ic-warn); background: #fffaf0;
+                      border-radius: 8px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
+        .ic-gatebar h4 { margin: 0 0 .5rem 0; color: var(--ic-warn); }
+        .ic-gatebar .actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+        .ic-gatebar button, .ic-gatebar a[role=button] { margin: 0; width: auto; }
+        .ic-toast { position: fixed; right: 1rem; bottom: 1rem; z-index: 50;
+                    background: #2d3748; color: #fff; padding: .6rem 1rem; border-radius: 6px;
+                    font-size: .88rem; opacity: 0; transition: opacity .25s; pointer-events: none; }
+        .ic-toast.show { opacity: .95; }
+        .ic-snippet { font-size: .8rem; color: #4a5568; }
+        .ic-bar { height: 8px; background: #edf2f7; border-radius: 999px; overflow: hidden; }
+        .ic-bar > span { display: block; height: 100%; background: var(--ic-accent); }
+        /* 报告正文 */
+        .ic-report { font-size: .95rem; line-height: 1.75; }
+        .ic-report h1, .ic-report h2, .ic-report h3 { margin-top: 1.4rem; }
+        .ic-report table { width: 100%; font-size: .87rem; }
+        .ic-report pre { background: #fafafa; padding: .9rem; border-radius: 6px; overflow-x: auto; }
+        .ic-report code { font-size: .86em; }
+        /* 引用角标 */
+        button.ic-cite { display: inline; width: auto; margin: 0 .1rem; padding: 0 .3rem;
+                         font-size: .74rem; line-height: 1.4; border-radius: 4px;
+                         background: #ebf8ff; color: var(--ic-accent);
+                         border: 1px solid #bee3f8; vertical-align: baseline; }
+        button.ic-cite:hover { background: #bee3f8; }
+        button.ic-cite-missing { background: #fff5f5; color: var(--ic-err); border-color: #fed7d7; }
+        /* 证据抽屉 */
+        .ic-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 92vw);
+                     background: #fff; border-left: 1px solid var(--pico-muted-border-color);
+                     box-shadow: -4px 0 18px rgba(0,0,0,.08); z-index: 60;
+                     transform: translateX(102%); transition: transform .22s ease;
+                     display: flex; flex-direction: column; }
+        .ic-drawer.open { transform: translateX(0); }
+        .ic-drawer-head { display: flex; justify-content: space-between; align-items: center;
+                          padding: .8rem 1rem; border-bottom: 1px solid var(--pico-muted-border-color); }
+        #ic-drawer-body { padding: 1rem; overflow-y: auto; }
+        .ic-drawer-mask { position: fixed; inset: 0; background: rgba(0,0,0,.25);
+                          opacity: 0; pointer-events: none; transition: opacity .22s; z-index: 55; }
+        .ic-drawer-mask.open { opacity: 1; pointer-events: auto; }
+        /* 新建任务：模型分配行（左角色说明 + 右下拉） */
+        .ic-role-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+                       padding: .55rem 1rem; border-bottom: 1px solid #f0f0f0; }
+        .ic-role-row:last-child { border-bottom: none; }
+        .ic-role-row > select { flex: 1; min-width: 220px; margin: 0; }
+    </style>
 </head>
 <body>
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+<nav class="ic-nav">
+    <div class="container">
+        <ul>
+            <li><a href="/tasks" class="ic-brand">InsightCrew</a></li>
+            <li><span class="ic-muted">多 Agent 协作技术调研</span></li>
+        </ul>
+        <ul>
+            {% if user %}
+                <li><span class="ic-muted">{{ user.username }}</span></li>
+                <li><a href="/docs" class="ic-muted">API</a></li>
+                <li><button class="outline secondary" style="width:auto;margin:0;padding:.3rem .8rem;"
+                            onclick="icLogout()">退出</button></li>
+            {% endif %}
+        </ul>
+    </div>
+</nav>
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
+<div id="ic-toast" class="ic-toast"></div>
+<script>
+    function icToast(msg) {
+        const el = document.getElementById('ic-toast');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 2200);
+    }
+    async function icLogout() {
+        await fetch('/auth/logout', { method: 'POST' });
+        location.href = '/login';
+    }
+    // 状态 → 徽标样式与中文名
+    const IC_STATUS = {
+        pending:  ['badge-pending',  '待开始'],
+        running:  ['badge-running',  '运行中'],
+        completed:['badge-done',     '已完成'],
+        failed:   ['badge-failed',   '失败'],
+        aborted:  ['badge-aborted',  '已中止']
+    };
+    function icStatusBadge(s) {
+        const [cls, label] = IC_STATUS[s] || ['badge-pending', s || '未知'];
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+</script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

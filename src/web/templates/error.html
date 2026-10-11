@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · InsightCrew{% endblock %}
+{% block content %}
+<article style="text-align:center;padding:3rem 1rem;">
+    <h1 style="font-size:3rem;margin-bottom:.2rem;">{{ code }}</h1>
+    <p style="font-size:1.05rem;">{{ message }}</p>
+    <div style="margin-top:1.4rem;display:flex;gap:.6rem;justify-content:center;">
+        <a role="button" href="{{ back_url or '/tasks' }}" style="width:auto;margin:0;">
+            {{ back_label or '返回任务列表' }}
+        </a>
+        {% if code == 401 %}
+        <a role="button" class="secondary" href="/login" style="width:auto;margin:0;">去登录</a>
+        {% endif %}
+    </div>
+</article>
+{% endblock %}

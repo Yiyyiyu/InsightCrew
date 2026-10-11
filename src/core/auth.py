@@ -23,6 +23,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ---- JWT ----
 ALGORITHM = "HS256"
 
+# 浏览器场景必须走 Cookie：页面跳转（<a href>）和 EventSource 都**无法**设置
+# Authorization 头，只有 Cookie 会自动携带。API 客户端仍可用 Bearer 头。
+ACCESS_COOKIE = "insightcrew_token"
+
 
 def create_access_token(user_id: int, username: str) -> str:
     """生成 JWT access_token（含 user_id + username + 过期时间）"""

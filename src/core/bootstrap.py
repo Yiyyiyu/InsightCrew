@@ -113,6 +113,15 @@ def ensure_crewai_environment() -> None:
     # 且交互终端下会白等 20 秒。这里显式关闭。
     os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
 
+    # litellm 在 import 期会去 GitHub 拉取在线价目表
+    # （`get_model_cost_map.py`：fetch https://raw.githubusercontent.com/BerriAI/litellm/
+    #  main/model_prices_and_context_window.json），失败重试 3 次才回落本地备份。
+    # 实测在受限网络下这一步会把 `import litellm` 拖到 120s+（脚本被当成挂死）。
+    # 设 True 直接用随包分发的本地价目表，实测导入耗时 120s+ → 2.9s。
+    # 副作用：新模型的单价不会自动更新——但本项目的成本核算用的是
+    # config/models.yaml 里的 pricing 段（见 src/core/cost.py），不依赖 litellm 价目表。
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
     try:
         if _needs_redirect():
             _redirect_to_dev_home()

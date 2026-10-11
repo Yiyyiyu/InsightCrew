@@ -24,6 +24,9 @@ crewai_settings.json
 # CrewAI 在受限沙箱下的配置目录重定向（本机运行时生成）
 .dev-home/
 
+# 运行时缓存（PDF 内嵌图表抽取产物等）
+/.cache/
+
 # IDE
 .idea/
 .vscode/
@@ -45,8 +48,19 @@ docker-compose.override.yml
 logs/
 
 # 本地私用内容，不入仓库（前导 / 锚定仓库根，避免误伤 src/tools/）
+# 判据（用户 2026-10-09）：测试与调试相关的东西只在本地做，不上传仓库；
+# 仓库只放产品运行时真正需要的代码。
+#   /Markdown/  PRD / 设计规划等文档
+#   /tools/     调试与验证脚本（verify_*.py / probe_*.py）
+#   /tests/     pytest 套件（本机跑，不上传）
+#   /pytest.ini 上面套件的配置
+#   /scripts/   开发便利工具（dev.ps1 写死了本机解释器路径；reset_dev_state.py 清开发脏数据）
 /Markdown/
 /tools/
+/tests/
+/pytest.ini
+/scripts/
+README.md
 
 # OS files
 .DS_Store

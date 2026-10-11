@@ -1,5 +1,9 @@
 """Researcher — 检索取证员
 
+提示词外置在 `src/prompts/researcher.yaml`（M1 遗留项 1）：
+`role`/`goal`/`backstory`、`task`（串行调试路径）、`single_task`（实际编排路径）
+与 `subdirections`（3 个子方向）全部来自 YAML。
+
 ★ 并行纪律（重要，勿改回单 Agent）：
 CrewAI 的每个 Agent 实例只持有一个 Executor，而 Executor 不允许并发调用
 （`crewai/experimental/agent_executor.py:2869` "Executor is already running.
@@ -13,8 +17,11 @@ Cannot invoke the same executor instance concurrently."）。
 
 from crewai import Agent, Task
 
-from src.tools.search import search_web, search_arxiv
+from src.prompts import agent_block, raw, task_block
 from src.tools.fetch import fetch_webpage
+from src.tools.pdf import parse_pdf
+from src.tools.search import search_arxiv, search_web
+from src.tools.vision import list_pdf_images, read_image
 
 # 3 个并行子方向：前 2 个异步并发，第 3 个同步收尾。
 # 最坏耗时 = max(90, 90) + 90 = 180s，落在 stage_timeout_sec(300s) 内；
@@ -22,50 +29,35 @@ from src.tools.fetch import fetch_webpage
 _TASK_MAX_EXEC_TIME = 90
 
 
+def _subdirections() -> list[dict]:
+    """从 YAML 读子方向定义（每次读缓存，mtime 变更自动重载）。
+
+    返回 [{name, desc, expected, async}, ...]，顺序即执行顺序。
+    """
+    block = raw("researcher").get("subdirections")
+    if not isinstance(block, list) or not block:
+        raise ValueError("researcher.yaml 缺少 subdirections 列表")
+    return block
+
+
 def create_researcher(llm=None, tag: str = "") -> Agent:
     """创建一个检索取证员（tag 用于区分并行实例的角色名）。"""
+    spec = agent_block("researcher", tag=tag)
     return Agent(
-        role=f"检索取证员{tag}",
-        goal="根据调研计划，使用搜索工具从互联网、arXiv 收集高质量技术资料，并抓取核心内容",
+        role=spec["role"],
+        goal=spec["goal"],
         llm=llm,
-        backstory=(
-            "你精通各种检索工具，能从 Bing、arXiv 等来源快速定位到最相关的技术文献、"
-            "开源项目和技术博客。你每次引用都会携带来源 ID 标记以确保可追溯。"
-        ),
+        backstory=spec["backstory"],
         verbose=True,
         allow_delegation=False,
-        tools=[search_web, search_arxiv, fetch_webpage],
+        tools=[
+            search_web, search_arxiv, fetch_webpage,
+            parse_pdf, list_pdf_images, read_image,
+        ],
         max_iter=6,                       # 每个任务最多 6 轮工具调用
         max_execution_time=_TASK_MAX_EXEC_TIME,  # 单任务墙钟上限（秒）
         max_retry_limit=0,                # 工具失败不重试，由工具自身返回明确失败信息
     )
-
-
-# 每个子任务：(方向名, 检索说明, 期望产出, 是否异步)
-_SUBDIRECTIONS = [
-    (
-        "CrewAI",
-        "搜索 CrewAI 的架构设计、核心概念（Agent/Task/Crew/Pipeline）、"
-        "最新版本特性、优缺点和社区评价",
-        "CrewAI 框架的检索摘要，含至少 3 条带引用标记的发现。",
-        True,
-    ),
-    (
-        "LangGraph",
-        "搜索 LangGraph 的架构设计（有向图编排）、StateGraph/MessageGraph 概念、"
-        "条件分支、循环机制、与 LangChain 的关系和社区评价",
-        "LangGraph 框架的检索摘要，含至少 3 条带引用标记的发现。",
-        True,
-    ),
-    (
-        "AutoGen",
-        "搜索 Microsoft AutoGen 的架构设计（多Agent对话）、"
-        "AssistantAgent/UserProxyAgent 机制、人机协作模式、"
-        "最新版本特性和社区评价",
-        "AutoGen 框架的检索摘要，含至少 3 条带引用标记的发现。",
-        False,   # 最后一个必须同步：CrewAI 禁止末尾连续多个异步任务
-    ),
-]
 
 
 def create_research_agents(llm=None, llm_factory=None) -> list[Agent]:
@@ -75,9 +67,9 @@ def create_research_agents(llm=None, llm_factory=None) -> list[Agent]:
     避免并发下共享客户端状态；否则所有 Agent 复用同一个 llm。
     """
     out: list[Agent] = []
-    for name, _, _, _ in _SUBDIRECTIONS:
+    for sub in _subdirections():
         this_llm = llm_factory() if llm_factory is not None else llm
-        out.append(create_researcher(llm=this_llm, tag=f"（{name}）"))
+        out.append(create_researcher(llm=this_llm, tag=f"（{sub['name']}）"))
     return out
 
 
@@ -93,35 +85,35 @@ def create_research_tasks(agents: list[Agent], plan: str) -> list[Task]:
     远超单任务耗时之和（单任务实测 18.8s，3 任务却撞穿 300s 阶段超时），
     且单个任务超时无法隔离。本函数保留供串行/调试使用。
     """
-    if len(agents) != len(_SUBDIRECTIONS):
-        raise ValueError(f"需要 {len(_SUBDIRECTIONS)} 个独立 Agent，收到 {len(agents)}")
+    subs = _subdirections()
+    if len(agents) != len(subs):
+        raise ValueError(f"需要 {len(subs)} 个独立 Agent，收到 {len(agents)}")
 
     tasks: list[Task] = []
-    total = len(_SUBDIRECTIONS)
-    for i, (agent, (name, desc, expected, is_async)) in enumerate(
-        zip(agents, _SUBDIRECTIONS), start=1
-    ):
+    total = len(subs)
+    for i, (agent, sub) in enumerate(zip(agents, subs), start=1):
+        spec = task_block(
+            "researcher",
+            task_key="task",
+            plan=plan,
+            index=i,
+            total=total,
+            name=sub["name"],
+            desc=sub["desc"],
+            expected=sub["expected"],
+        )
         tasks.append(Task(
-            description=(
-                f"调研计划：\n{plan}\n\n"
-                f"【检索任务 {i}/{total} — {name} 框架】\n"
-                f"{desc}\n\n"
-                "要求：\n"
-                "1. 至少引用 3 个独立来源\n"
-                "2. 每个论断标注来源引用标记 [S{id}#{chunk_seq}]"
-                "（必须使用工具返回的真实标记，不得编造）\n"
-                "3. 输出 Markdown 格式"
-            ),
-            expected_output=expected,
+            description=spec["description"],
+            expected_output=spec["expected_output"],
             agent=agent,
-            async_execution=is_async,
+            async_execution=bool(sub.get("async", False)),
         ))
     return tasks
 
 
 def subdirection_names() -> list[str]:
     """所有检索子方向名称（供编排层打印/统计）。"""
-    return [name for name, _, _, _ in _SUBDIRECTIONS]
+    return [sub["name"] for sub in _subdirections()]
 
 
 def create_single_research_crew(llm, index: int, plan: str):
@@ -133,24 +125,26 @@ def create_single_research_crew(llm, index: int, plan: str):
     """
     from crewai import Crew, Process
 
-    if not 0 <= index < len(_SUBDIRECTIONS):
+    subs = _subdirections()
+    if not 0 <= index < len(subs):
         raise IndexError(f"子方向索引越界: {index}")
 
-    name, desc, expected, _ = _SUBDIRECTIONS[index]
-    total = len(_SUBDIRECTIONS)
-    agent = create_researcher(llm=llm, tag=f"（{name}）")
+    sub = subs[index]
+    total = len(subs)
+    spec = task_block(
+        "researcher",
+        task_key="single_task",
+        plan=plan,
+        index=index + 1,
+        total=total,
+        name=sub["name"],
+        desc=sub["desc"],
+        expected=sub["expected"],
+    )
+    agent = create_researcher(llm=llm, tag=f"（{sub['name']}）")
     task = Task(
-        description=(
-            f"调研计划（供你理解上下文，不必逐条执行）：\n{plan}\n\n"
-            f"【你的检索任务 {index + 1}/{total} — {name} 框架】\n"
-            f"{desc}\n\n"
-            "要求：\n"
-            "1. 至少引用 3 个独立来源\n"
-            "2. 每个论断标注来源引用标记 [S{id}#{chunk_seq}]"
-            "（必须使用工具返回的真实标记，不得编造）\n"
-            "3. 输出 Markdown 格式"
-        ),
-        expected_output=expected,
+        description=spec["description"],
+        expected_output=spec["expected_output"],
         agent=agent,
         async_execution=False,
     )

@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}{{ task.topic }} · InsightCrew{% endblock %}
+{% block content %}
+<p class="ic-muted" style="margin-bottom:.3rem;"><a href="/tasks">← 返回任务列表</a></p>
+<h2 style="margin-bottom:.3rem;">{{ task.topic }}</h2>
+<p class="ic-muted">
+    任务 #{{ task.id }} · 创建于 {{ task.created_at }} ·
+    <span id="ic-status-wrap"></span>
+</p>
+
+<!-- 顶部：成本 / 进度 -->
+<div class="ic-card" style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+        <div class="ic-muted">当前阶段</div>
+        <div id="ic-stage" style="font-weight:600;">—</div>
+    </div>
+    <div>
+        <div class="ic-muted">已花费 / 上限</div>
+        <div class="ic-cost"><span id="ic-cost">¥0.0000</span>
+            <span class="ic-muted">/ ¥<span id="ic-limit">5.00</span></span></div>
+    </div>
+    <div style="min-width:180px;">
+        <div class="ic-muted">执行方式</div>
+        <div id="ic-exec" style="font-size:.9rem;">—</div>
+    </div>
+    <div style="min-width:220px;flex:1;">
+        <div class="ic-muted">进度</div>
+        <div class="ic-bar" style="margin-top:.4rem;"><span id="ic-progress" style="width:0%"></span></div>
+    </div>
+</div>
+
+<!-- 人工闸门（有 pending 闸门时显示） -->
+<div id="ic-gatebar" class="ic-gatebar" style="display:none;">
+    <h4>⏸ 等待人工确认 — 阶段「<span id="ic-gate-stage"></span>」已完成</h4>
+    <p class="ic-muted" style="margin:.2rem 0 .6rem 0;">
+        确认继续 → 进入下一阶段；打回重做 → 回退到上一阶段重跑。
+    </p>
+    <div class="actions">
+        <button id="ic-approve" style="width:auto;margin:0;">确认继续</button>
+        <input type="text" id="ic-comment" placeholder="备注（打回时建议填写）"
+               style="margin:0;flex:1;min-width:180px;">
+        <button id="ic-reject" class="secondary" style="width:auto;margin:0;">打回重做</button>
+        <button id="ic-abort" class="outline" style="width:auto;margin:0;">中止任务</button>
+    </div>
+</div>
+
+<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <a id="ic-report-link" role="button" class="outline" style="display:none;width:auto;margin:0;"
+       href="#">查看最终报告</a>
+    <a id="ic-evidence-link" role="button" class="outline secondary" style="width:auto;margin:0;"
+       href="/tasks/{{ task.id }}/evidence">证据台账</a>
+    <button id="ic-abort2" class="outline secondary" style="width:auto;margin:0;">中止任务</button>
+</div>
+
+<div class="ic-grid">
+    <!-- 左：Agent 协作时间线 -->
+    <div>
+        <h3 style="font-size:1.05rem;">Agent 协作时间线
+            <span id="ic-live" class="badge badge-running">实时</span>
+        </h3>
+        <div id="ic-timeline" class="ic-timeline">
+            <div class="ic-muted">正在连接事件流 ...</div>
+        </div>
+    </div>
+
+    <!-- 右：中间产物 -->
+    <div>
+        <h3 style="font-size:1.05rem;">中间产物</h3>
+        <details class="ic-card" open>
+            <summary>调研大纲（plan）</summary>
+            <pre class="ic-md" id="ic-p-plan">—</pre>
+        </details>
+        <details class="ic-card">
+            <summary>分析结论（analysis）</summary>
+            <pre class="ic-md" id="ic-p-analysis">—</pre>
+        </details>
+        <details class="ic-card">
+            <summary>质疑意见（critic）</summary>
+            <pre class="ic-md" id="ic-p-critic">—</pre>
+        </details>
+        <details class="ic-card">
+            <summary>质疑回应（rebuttal）</summary>
+            <pre class="ic-md" id="ic-p-rebuttal">—</pre>
+        </details>
+        <details class="ic-card">
+            <summary>报告草稿（write）</summary>
+            <pre class="ic-md" id="ic-p-report">—</pre>
+        </details>
+        <details class="ic-card">
+            <summary>评审意见（review）</summary>
+            <pre class="ic-md" id="ic-p-review">—</pre>
+        </details>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TASK_ID = {{ task.id }};
+const STAGES = ['plan', 'research', 'analysis', 'critic', 'rebuttal', 'write', 'review'];
+const STAGE_LABELS = {{ stage_labels | tojson }};
+
+// ── 时间线 ──
+const timeline = document.getElementById('ic-timeline');
+let firstEvent = true;
+
+function addEvent(cls, title, detail) {
+    if (firstEvent) { timeline.innerHTML = ''; firstEvent = false; }
+    const div = document.createElement('div');
+    div.className = 'ic-ev ' + (cls || '');
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    div.innerHTML = `<span class="ic-muted">${time}</span>
+        <span class="t">${title}</span>${detail ? ' · ' + detail : ''}`;
+    timeline.appendChild(div);
+    timeline.scrollTop = timeline.scrollHeight;
+}
+
+// ── 状态渲染 ──
+function renderStatus(s) {
+    document.getElementById('ic-status-wrap').innerHTML = icStatusBadge(s.status);
+    document.getElementById('ic-stage').textContent =
+        STAGE_LABELS[s.current_stage] || s.current_stage || '—';
+    document.getElementById('ic-exec').textContent = s.exec_path || '—';
+    document.getElementById('ic-cost').textContent = '¥' + (s.total_cost_cny || 0).toFixed(4);
+    document.getElementById('ic-limit').textContent = (s.budget_limit_cny || 0).toFixed(2);
+
+    const idx = STAGES.indexOf(s.current_stage);
+    // 分母跟着 STAGES 走，避免加阶段时漏改硬编码的 6
+    const done = s.status === 'completed' ? STAGES.length : (idx < 0 ? 0 : idx);
+    document.getElementById('ic-progress').style.width = Math.round(done / STAGES.length * 100) + '%';
+
+    // 闸门条
+    const bar = document.getElementById('ic-gatebar');
+    if (s.pending_gate && s.status === 'running') {
+        bar.style.display = 'block';
+        document.getElementById('ic-gate-stage').textContent =
+            STAGE_LABELS[s.current_stage] || s.current_stage;
+    } else {
+        bar.style.display = 'none';
+    }
+
+    // 报告链接
+    const rl = document.getElementById('ic-report-link');
+    if (s.status === 'completed') {
+        rl.style.display = 'inline-block';
+        rl.href = '/tasks/' + TASK_ID + '/report';
+    } else {
+        rl.style.display = 'none';
+    }
+
+    // 中间产物
+    if (s.plan_output) document.getElementById('ic-p-plan').textContent = s.plan_output;
+    if (s.analysis_output) document.getElementById('ic-p-analysis').textContent = s.analysis_output;
+    if (s.critic_output) document.getElementById('ic-p-critic').textContent = s.critic_output;
+    if (s.rebuttal_output) document.getElementById('ic-p-rebuttal').textContent = s.rebuttal_output;
+    if (s.report_draft) document.getElementById('ic-p-report').textContent = s.report_draft;
+    if (s.review_output) document.getElementById('ic-p-review').textContent = s.review_output;
+}
+
+async function refreshStatus() {
+    try {
+        const r = await fetch('/research/' + TASK_ID + '/status');
+        if (!r.ok) return;
+        renderStatus(await r.json());
+    } catch (e) { /* 轮询失败静默，SSE 仍在跑 */ }
+}
+
+// ── SSE ──
+// EventSource 会自动带上同源 Cookie（页面鉴权走 Cookie，见 src/api/deps.py）
+const es = new EventSource('/research/' + TASK_ID + '/events');
+
+const HANDLERS = {
+    stage_start: d => addEvent('', `开始阶段：${d.label || d.stage}`, ''),
+    stage_done:  d => addEvent('done', `阶段完成：${STAGE_LABELS[d.stage] || d.stage}`, ''),
+    gate_pending: d => addEvent('gate', `等待人工确认：${d.label || d.stage}`, ''),
+    gate_approved: d => addEvent('done', '人工确认通过', d.gate || ''),
+    gate_rejected: d => addEvent('gate', '人工打回重做', d.comment || ''),
+    research_fanout: d => addEvent('', '并行调研展开',
+        (d.directions || []).map(x => `${x.name}(${x.chars}字)`).join('、')),
+    research_direction_done: d => addEvent('', `子方向完成：${d.direction}`,
+        `${d.chars} 字 / ${d.seconds}s`),
+    research_direction_failed: d => addEvent('err', `子方向失败：${d.direction}`, d.reason || ''),
+    citation_check: d => addEvent(d.pass ? 'done' : 'err',
+        `引用校验：${d.valid}/${d.total} 有效`,
+        d.invalid ? `幻觉 ${d.invalid} 处` : '全部可回溯'),
+    critique_resolution: d => addEvent('done', '质疑回应完成',
+        `回应率 ${Math.round((d.rate || 0) * 100)}%`),
+    stage_error: d => addEvent('err', `阶段出错：${STAGE_LABELS[d.stage] || d.stage}`,
+        d.error || ''),
+    pipeline_complete: d => { addEvent('done', '调研流水线完成', ''); refreshStatus(); },
+    pipeline_aborted: d => { addEvent('err', '任务已中止', ''); refreshStatus(); },
+};
+
+for (const [type, fn] of Object.entries(HANDLERS)) {
+    es.addEventListener(type, ev => {
+        let d = {};
+        try { d = JSON.parse(ev.data); } catch (e) { d = { raw: ev.data }; }
+        fn(d);
+        // 阶段推进后刷新状态（成本、进度、闸门）
+        if (['stage_done', 'gate_pending', 'pipeline_complete',
+             'pipeline_aborted', 'stage_error'].includes(type)) {
+            refreshStatus();
+        }
+    });
+}
+
+es.onerror = () => {
+    // EventSource 会自动重连（带 Last-Event-ID 增量续传，服务端已支持）
+    document.getElementById('ic-live').className = 'badge badge-pending';
+    document.getElementById('ic-live').textContent = '重连中';
+};
+es.onopen = () => {
+    document.getElementById('ic-live').className = 'badge badge-running';
+    document.getElementById('ic-live').textContent = '实时';
+};
+
+// ── 闸门动作 ──
+async function gateAction(action, needComment) {
+    const comment = document.getElementById('ic-comment').value.trim();
+    if (needComment && !comment && !confirm('未填写备注，确定要打回重做吗？')) return;
+    const body = { gate_name: 'gate_' + (window.__curStage || 'plan'), comment };
+    try {
+        const r = await fetch('/research/' + TASK_ID + '/' + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { icToast(data.detail || ('失败：HTTP ' + r.status)); return; }
+        icToast(action === 'approve' ? '已确认，继续执行' : '已打回，重跑上一阶段');
+        document.getElementById('ic-comment').value = '';
+        refreshStatus();
+    } catch (e) { icToast('网络错误：' + e); }
+}
+
+document.getElementById('ic-approve').addEventListener('click', async () => {
+    // gate_name 必须与当前 pending 闸门一致，从最新状态里取
+    await syncStage();
+    gateAction('approve', false);
+});
+document.getElementById('ic-reject').addEventListener('click', async () => {
+    await syncStage();
+    gateAction('reject', true);
+});
+
+let __stageSynced = false;
+async function syncStage() {
+    try {
+        const r = await fetch('/research/' + TASK_ID + '/status');
+        if (r.ok) {
+            const s = await r.json();
+            window.__curStage = s.current_stage;
+            __stageSynced = true;
+        }
+    } catch (e) {}
+}
+
+async function abortTask() {
+    if (!confirm('确定中止该任务？')) return;
+    try {
+        const r = await fetch('/research/' + TASK_ID + '/abort', { method: 'POST' });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); icToast(d.detail || '中止失败'); return; }
+        icToast('任务已中止');
+        refreshStatus();
+    } catch (e) { icToast('网络错误：' + e); }
+}
+document.getElementById('ic-abort').addEventListener('click', abortTask);
+document.getElementById('ic-abort2').addEventListener('click', abortTask);
+
+// ── 初始加载 ──
+(async () => {
+    await refreshStatus();
+    await syncStage();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}证据台账 · {{ task.topic }}{% endblock %}
+{% block content %}
+<p class="ic-muted" style="margin-bottom:.3rem;">
+    <a href="/tasks">← 任务列表</a> ·
+    <a href="/tasks/{{ task.id }}">任务详情</a>
+</p>
+<h2 style="margin-bottom:.3rem;">证据台账</h2>
+<p class="ic-muted">{{ task.topic }} · 共 {{ claims|length }} 条论断</p>
+
+<p class="ic-muted">
+    证据分级：<span class="badge badge-done">A 全文验证</span>
+    <span class="badge badge-running">B 摘要级</span>
+    <span class="badge badge-pending">C 待复核</span>
+    —— A 来自整页抓取/PDF 正文，B 来自搜索摘要，两者都可回溯到原始 URL。
+</p>
+
+{% if claims %}
+    {% for c in claims %}
+    <div class="ic-card">
+        <div style="display:flex;gap:.6rem;align-items:flex-start;">
+            <span class="badge {{ 'badge-done' if c.level == 'A' else 'badge-running' if c.level == 'B' else 'badge-pending' }}"
+                  title="证据等级">{{ c.level }}</span>
+            <div style="flex:1;">
+                <div style="font-size:.95rem;">{{ c.text }}</div>
+                {% if c.evidence %}
+                    <div style="margin-top:.6rem;">
+                        {% for e in c.evidence %}
+                        <div class="ic-ev">
+                            <div>
+                                <code>{{ e.marker }}</code>
+                                {% if e.title %}· {{ e.title }}{% endif %}
+                                {% if e.page_num %}· 第 {{ e.page_num }} 页{% endif %}
+                            </div>
+                            <div><a href="{{ e.url }}" target="_blank" rel="noopener noreferrer"
+                                    class="ic-snippet">{{ e.url }}</a></div>
+                            {% if e.snippet %}
+                            <div class="ic-snippet" style="margin-top:.3rem;">{{ e.snippet }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="ic-muted" style="margin-top:.4rem;">该论断暂无关联证据（待复核）</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <article>
+        <p class="ic-muted">
+            还没有论断记录。论断在「调研」与「撰写」阶段完成引用校验时自动落账；
+            若任务尚未跑到这两个阶段，请稍后再看。
+        </p>
+    </article>
+{% endif %}
+{% endblock %}

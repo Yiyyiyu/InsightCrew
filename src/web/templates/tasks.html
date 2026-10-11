@@ -1,0 +1,641 @@
+{% extends "base.html" %}
+{% block title %}任务列表 · InsightCrew{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <h2 style="margin:0;">调研任务</h2>
+    <button id="ic-new-btn" style="width:auto;margin:0;">+ 新建任务</button>
+</div>
+
+<!-- 新建任务表单（默认隐藏） -->
+<article id="ic-new-form" style="display:none;margin-top:1rem;">
+    <header><strong>新建调研任务</strong></header>
+    <label>调研主题
+        <input type="text" id="ic-topic" placeholder="例如：多 Agent 框架选型（CrewAI / LangGraph / AutoGen）">
+    </label>
+    <label>评估维度 <span class="ic-muted">（可选，逗号分隔）</span>
+        <input type="text" id="ic-dimensions" placeholder="例如：性能, 生态成熟度, 学习曲线, 生产可用性">
+    </label>
+    <label>技术约束 <span class="ic-muted">（可选）</span>
+        <input type="text" id="ic-constraints" placeholder="例如：Python 3.11、不引入商业付费 API、需支持私有化部署">
+    </label>
+    <label style="max-width:260px;">预算上限（元）
+        <input type="number" id="ic-budget" step="0.1" min="0" placeholder="留空用全局默认（¥5.00）">
+    </label>
+
+    <!-- ── 模型分配：7 个下拉（6 角色 + 读图）── -->
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                gap:.6rem;flex-wrap:wrap;margin:1.1rem 0 .5rem 0;">
+        <h4 style="margin:0;font-size:.95rem;">模型分配 <span class="ic-muted" style="font-weight:400;">
+            （每个角色一个模型）</span></h4>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+            <span id="ic-lock-chip" class="ic-muted"></span>
+            <button type="button" id="ic-unlock-btn" class="secondary outline"
+                    style="width:auto;margin:0;padding:.25rem .7rem;font-size:.82rem;">解锁内置</button>
+            <button type="button" id="ic-manage-btn" class="secondary outline"
+                    style="width:auto;margin:0;padding:.25rem .7rem;font-size:.82rem;">管理来源与模型</button>
+        </div>
+    </div>
+    <div id="ic-role-selects" class="ic-card" style="padding:0;overflow:hidden;margin:0;">
+        <div class="ic-muted" style="padding:.9rem 1rem;">正在加载模型目录 ...</div>
+    </div>
+    <div id="ic-model-hint" class="ic-muted" style="font-size:.78rem;margin-top:.45rem;"></div>
+
+    <p class="ic-muted" style="margin-top:.9rem;">提交后将依次执行 规划 → 调研 → 分析 → 质疑 → 回应 → 撰写 → 评审 七个阶段，每个阶段结束需要你确认。</p>
+    <div style="display:flex;gap:.6rem;">
+        <button id="ic-create-btn" style="width:auto;margin:0;">启动</button>
+        <button type="button" class="secondary outline" style="width:auto;margin:0;"
+                onclick="document.getElementById('ic-new-form').style.display='none'">取消</button>
+    </div>
+    <div id="ic-new-msg" class="ic-muted" style="margin-top:.6rem;"></div>
+</article>
+
+{% if tasks %}
+    <div style="margin-top:1.2rem;">
+    {% for t in tasks %}
+        <div class="ic-card">
+            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+                <div style="flex:1;min-width:260px;">
+                    <a href="/tasks/{{ t.id }}" style="font-weight:600;font-size:1.05rem;">{{ t.topic }}</a>
+                    <div class="ic-muted" style="margin-top:.3rem;">
+                        #{{ t.id }} · {{ t.created_at }}
+                        · 阶段 {{ stage_labels.get(t.current_stage, t.current_stage) }}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div>
+                        <span class="badge {{ 'badge-done' if t.status == 'completed' else 'badge-running' if t.status == 'running' else 'badge-failed' if t.status == 'failed' else 'badge-aborted' if t.status == 'aborted' else 'badge-pending' }}">
+                            {{ {'pending':'待开始','running':'运行中','completed':'已完成','failed':'失败','aborted':'已中止'}.get(t.status, t.status) }}
+                        </span>
+                        {% if t.gate_status == 'pending' %}
+                            <span class="badge badge-gate">待人工确认</span>
+                        {% endif %}
+                    </div>
+                    <div class="ic-cost ic-muted" style="margin-top:.35rem;">¥{{ '%.4f'|format(t.total_cost_cny) }}</div>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+{% else %}
+    <article style="margin-top:1.2rem;">
+        <p class="ic-muted">还没有调研任务。点击「+ 新建任务」开始第一个。</p>
+    </article>
+{% endif %}
+
+<!-- ════════════ 抽屉：管理来源与模型（复用 base.html 的 .ic-drawer）════════════ -->
+<div id="ic-drawer" class="ic-drawer" style="width:min(640px,94vw);">
+    <div class="ic-drawer-head">
+        <strong>管理来源与模型</strong>
+        <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
+                onclick="icCloseDrawer()">✕</button>
+    </div>
+    <div id="ic-drawer-body">
+        <!-- 内置分组 -->
+        <div class="ic-card" style="padding:.8rem 1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;">
+                <strong style="font-size:.92rem;">🔒 官方来源（内置）</strong>
+                <span id="ic-dw-lockstate" class="ic-muted" style="font-size:.8rem;"></span>
+            </div>
+            <p class="ic-muted" style="font-size:.8rem;margin:.4rem 0 0 0;">
+                内置 5 个模型由站长提供 Key，需密码解锁后本账号才可见可用。解锁状态按账号隔离。
+            </p>
+        </div>
+
+        <!-- 我的来源 -->
+        <div class="ic-card" style="padding:.8rem 1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;">
+                <strong style="font-size:.92rem;">我的来源（自建）</strong>
+                <button type="button" class="outline" style="width:auto;margin:0;padding:.2rem .7rem;font-size:.8rem;"
+                        onclick="icProviderForm(null)">+ 添加来源</button>
+            </div>
+            <div id="ic-prov-list" class="ic-muted" style="font-size:.85rem;margin-top:.5rem;">加载中 ...</div>
+        </div>
+
+        <!-- 我的模型 -->
+        <div class="ic-card" style="padding:.8rem 1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;">
+                <strong style="font-size:.92rem;">我的模型</strong>
+                <button type="button" class="outline" style="width:auto;margin:0;padding:.2rem .7rem;font-size:.8rem;"
+                        onclick="icModelForm(null)">+ 添加模型</button>
+            </div>
+            <div id="ic-model-list" class="ic-muted" style="font-size:.85rem;margin-top:.5rem;">加载中 ...</div>
+        </div>
+
+        <!-- 内联表单容器 -->
+        <div id="ic-form-slot"></div>
+
+        <div style="text-align:right;margin-top:.6rem;">
+            <button type="button" class="outline secondary" style="width:auto;margin:0;"
+                    onclick="icCloseDrawer()">完成</button>
+        </div>
+    </div>
+</div>
+<div id="ic-drawer-mask" class="ic-drawer-mask" onclick="icCloseDrawer()"></div>
+
+<!-- ════════════ 解锁弹窗 ════════════ -->
+<div id="ic-unlock-mask" class="ic-drawer-mask" onclick="icCloseUnlock()"></div>
+<div id="ic-unlock-box" class="ic-drawer" style="width:min(400px,92vw);height:auto;top:12vh;right:50%;
+     transform:translateX(50%) translateY(-12px);opacity:0;pointer-events:none;border-left:none;
+     border:1px solid var(--pico-muted-border-color);border-radius:10px;transition:opacity .2s,transform .2s;">
+    <div class="ic-drawer-head">
+        <strong>🔒 解锁内置模型</strong>
+        <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
+                onclick="icCloseUnlock()">✕</button>
+    </div>
+    <div style="padding:1rem;">
+        <label>解锁密码
+            <input type="password" id="ic-unlock-pwd" placeholder="输入站长设置的密码"
+                   onkeydown="if(event.key==='Enter')icDoUnlock()">
+        </label>
+        <div id="ic-unlock-msg" class="ic-muted" style="font-size:.82rem;min-height:1.2em;"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;">
+            <button type="button" class="outline secondary" style="width:auto;margin:0;"
+                    onclick="icCloseUnlock()">取消</button>
+            <button type="button" id="ic-unlock-go" style="width:auto;margin:0;" onclick="icDoUnlock()">解锁</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ════════════════════════════════════════════════════════════════
+// 模型目录（方案 B：7 个下拉直接摆在新建任务表单里）
+// ════════════════════════════════════════════════════════════════
+const ROLE_META = {
+    Planner:    ['调研规划', '拆子问题、定评分标准'],
+    Researcher: ['检索取证', '抓网页 / PDF / 读图'],
+    Analyst:    ['对比分析', '产出对比矩阵，含质疑回应'],
+    Critic:     ['红队质疑', '找反证与风险'],
+    Writer:     ['报告撰写', '长上下文，产出中文报告'],
+    Reviewer:   ['质量审核', '引用与结论把关'],
+    vision:     ['读图模型', 'Research 阶段解析 PDF 图表'],
+};
+let CATALOG = null;
+
+function icEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** 后端错误体可能是 {detail: "..."} 或 {detail: {code, message, failures}} */
+function icErrText(data, status) {
+    const d = data && data.detail;
+    if (typeof d === 'string') return d;
+    if (d && typeof d === 'object') {
+        if (d.code === 'model_unreachable' && Array.isArray(d.failures)) {
+            const lines = d.failures.map(f =>
+                `${(f.roles || []).join('/') || f.option_id} → ${f.model_id}：${f.error || '不可达'}`);
+            return '以下模型预检未通过，任务未创建：\n' + lines.join('\n');
+        }
+        if (d.code === 'builtin_locked') {
+            return d.reason === 'no_model'
+                ? '你还没有可用模型：请先解锁内置模型，或在「管理来源与模型」里添加自己的来源与模型。'
+                : `模型 ${(d.roles || []).join('、')} 选择了你未解锁的内置模型，请先解锁或改选自建模型。`;
+        }
+        if (d.message) return d.message;
+    }
+    return '失败：HTTP ' + status;
+}
+
+async function icLoadCatalog() {
+    const box = document.getElementById('ic-role-selects');
+    try {
+        const r = await fetch('/models/catalog');
+        if (!r.ok) { box.innerHTML = `<div class="ic-muted" style="padding:.9rem 1rem;">模型目录加载失败（HTTP ${r.status}）</div>`; return; }
+        CATALOG = await r.json();
+    } catch (e) {
+        box.innerHTML = `<div class="ic-muted" style="padding:.9rem 1rem;">模型目录加载失败：${icEsc(e)}</div>`;
+        return;
+    }
+    icRenderRoles();
+    icRenderLockState();
+}
+
+function icRenderLockState() {
+    const unlocked = CATALOG && CATALOG.unlocked;
+    const chip = document.getElementById('ic-lock-chip');
+    const btn = document.getElementById('ic-unlock-btn');
+    const hint = document.getElementById('ic-model-hint');
+    const dw = document.getElementById('ic-dw-lockstate');
+    if (unlocked) {
+        const exp = CATALOG.unlock_expires_at ? String(CATALOG.unlock_expires_at).slice(0, 16).replace('T', ' ') : '';
+        chip.textContent = '内置已解锁' + (exp ? '（至 ' + exp + '）' : '');
+        chip.style.color = 'var(--ic-ok)';
+        btn.textContent = '重新解锁';
+        if (dw) { dw.textContent = '已解锁'; dw.style.color = 'var(--ic-ok)'; }
+        hint.textContent = '内置模型已解锁，可在上方下拉中直接选用。';
+    } else {
+        chip.textContent = '内置模型已锁定';
+        chip.style.color = 'var(--ic-warn)';
+        btn.textContent = '解锁内置';
+        if (dw) { dw.textContent = '已锁定'; dw.style.color = 'var(--ic-warn)'; }
+        hint.textContent = '内置模型已锁定，下拉里只显示你自己的模型；点「解锁内置」输入密码后可用。';
+    }
+}
+
+function icRenderRoles() {
+    const box = document.getElementById('ic-role-selects');
+    const opts = (CATALOG && CATALOG.options) || [];
+    const roles = (CATALOG && CATALOG.roles) || Object.keys(ROLE_META);
+    const plan = (CATALOG && CATALOG.default_plan) || {};
+
+    const mine = opts.filter(o => o.source !== 'builtin');
+    const builtin = opts.filter(o => o.source === 'builtin');
+
+    if (!opts.length) {
+        box.innerHTML = `<div style="padding:1rem;">
+            <p class="ic-muted" style="margin:0;">当前账号没有任何可用模型。</p>
+            <p class="ic-muted" style="margin:.4rem 0 0 0;font-size:.85rem;">
+                请点「解锁内置」用密码开通内置模型，或点「管理来源与模型」添加你自己的 API 来源。</p>
+        </div>`;
+        return;
+    }
+
+    function optgroup(label, list) {
+        if (!list.length) return '';
+        return `<optgroup label="${icEsc(label)}">` + list.map(o =>
+            `<option value="${icEsc(o.id)}">${icEsc(o.display_name)}${o.price_in || o.price_out
+                ? `（¥${o.price_in}/¥${o.price_out} 每 M token）` : '（免费）'}</option>`
+        ).join('') + '</optgroup>';
+    }
+
+    box.innerHTML = roles.map(role => {
+        const meta = ROLE_META[role] || [role, ''];
+        const sel = plan[role] || (opts[0] && opts[0].id) || '';
+        return `<div class="ic-role-row">
+            <div style="min-width:150px;">
+                <div style="font-weight:600;font-size:.88rem;">${icEsc(meta[0])}
+                    <span class="ic-muted" style="font-weight:400;">· ${icEsc(role)}</span></div>
+                <div class="ic-muted" style="font-size:.76rem;">${icEsc(meta[1])}</div>
+            </div>
+            <select class="ic-role-select" data-role="${icEsc(role)}">
+                ${optgroup('我的模型（自建）', mine)}
+                ${optgroup('内置模型', builtin)}
+            </select>
+        </div>`;
+    }).join('');
+
+    // 应用 default_plan
+    box.querySelectorAll('select.ic-role-select').forEach(s => {
+        const want = plan[s.dataset.role];
+        if (want && Array.from(s.options).some(o => o.value === want)) s.value = want;
+    });
+}
+
+function icCollectPlan() {
+    const plan = {};
+    document.querySelectorAll('select.ic-role-select').forEach(s => {
+        if (s.value) plan[s.dataset.role] = s.value;
+    });
+    return plan;
+}
+
+// ── 抽屉开关 ──
+function icOpenDrawer() {
+    document.getElementById('ic-drawer').classList.add('open');
+    document.getElementById('ic-drawer-mask').classList.add('open');
+    icLoadProviders();
+    icLoadModels();
+}
+function icCloseDrawer() {
+    document.getElementById('ic-drawer').classList.remove('open');
+    document.getElementById('ic-drawer-mask').classList.remove('open');
+    document.getElementById('ic-form-slot').innerHTML = '';
+}
+
+// ════════════════════════════════════════════════════════════════
+// 解锁 / 上锁
+// ════════════════════════════════════════════════════════════════
+function icOpenUnlock() {
+    document.getElementById('ic-unlock-mask').classList.add('open');
+    const b = document.getElementById('ic-unlock-box');
+    b.style.opacity = '1';
+    b.style.transform = 'translateX(50%) translateY(0)';
+    b.style.pointerEvents = 'auto';
+    document.getElementById('ic-unlock-msg').textContent = '';
+    const pwd = document.getElementById('ic-unlock-pwd');
+    pwd.value = ''; pwd.focus();
+}
+function icCloseUnlock() {
+    document.getElementById('ic-unlock-mask').classList.remove('open');
+    const b = document.getElementById('ic-unlock-box');
+    b.style.opacity = '0';
+    b.style.transform = 'translateX(50%) translateY(-12px)';
+    b.style.pointerEvents = 'none';
+}
+async function icDoUnlock() {
+    const pwd = document.getElementById('ic-unlock-pwd').value;
+    const msg = document.getElementById('ic-unlock-msg');
+    if (!pwd) { msg.textContent = '请输入密码'; return; }
+    msg.textContent = '正在校验 ...';
+    const btn = document.getElementById('ic-unlock-go');
+    btn.disabled = true;
+    try {
+        const r = await fetch('/models/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwd })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = icErrText(data, r.status); return; }
+        icCloseUnlock();
+        icToast('内置模型已解锁');
+        await icLoadCatalog();
+    } catch (e) {
+        msg.textContent = '网络错误：' + e;
+    } finally {
+        btn.disabled = false;
+    }
+}
+async function icDoLock() {
+    const r = await fetch('/models/lock', { method: 'POST' });
+    if (r.ok) { icToast('内置模型已上锁'); await icLoadCatalog(); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 来源（providers）CRUD
+// ════════════════════════════════════════════════════════════════
+let PROVIDERS = [];
+let MODELS = [];
+
+async function icLoadProviders() {
+    const box = document.getElementById('ic-prov-list');
+    try {
+        const r = await fetch('/models/providers');
+        if (!r.ok) { box.textContent = '加载失败（HTTP ' + r.status + '）'; return; }
+        PROVIDERS = await r.json();
+    } catch (e) { box.textContent = '加载失败：' + e; return; }
+    if (!PROVIDERS.length) {
+        box.innerHTML = '<span class="ic-muted">还没有自建来源。点「+ 添加来源」接入你自己的 API Key。</span>';
+        return;
+    }
+    box.innerHTML = PROVIDERS.map(p => `<div style="display:flex;justify-content:space-between;
+        align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid #f0f0f0;">
+        <div style="min-width:0;">
+            <div style="font-weight:600;">${icEsc(p.name)}</div>
+            <div class="ic-muted" style="font-size:.76rem;word-break:break-all;">${icEsc(p.api_base)}
+                · ${p.model_count} 个模型 · Key ${icEsc(p.api_key_mask)}</div>
+        </div>
+        <div style="display:flex;gap:.35rem;flex-shrink:0;">
+            <button type="button" class="outline" style="width:auto;margin:0;padding:.15rem .55rem;font-size:.76rem;"
+                    onclick="icProviderForm(${p.id})">编辑</button>
+            <button type="button" class="outline secondary" style="width:auto;margin:0;padding:.15rem .55rem;font-size:.76rem;"
+                    onclick="icDeleteProvider(${p.id})">删除</button>
+        </div>
+    </div>`).join('');
+}
+
+function icProviderForm(id) {
+    const p = id ? PROVIDERS.find(x => x.id === id) : null;
+    document.getElementById('ic-form-slot').innerHTML = `<div class="ic-card" style="padding:.9rem 1rem;">
+        <strong style="font-size:.9rem;">${p ? '编辑来源' : '新增来源'}</strong>
+        <label style="margin-top:.5rem;">来源名称
+            <input type="text" id="ic-p-name" value="${p ? icEsc(p.name) : ''}" placeholder="例如：我的 OneAPI">
+        </label>
+        <label>API 地址（公开可访问的 http(s) 网关）
+            <input type="text" id="ic-p-base" value="${p ? icEsc(p.api_base) : ''}" placeholder="https://api.deepseek.com/v1">
+        </label>
+        <label>API Key ${p ? '<span class="ic-muted">（留空表示不修改）</span>' : ''}
+            <input type="password" id="ic-p-key" placeholder="${p ? '留空 = 保持原 Key' : 'sk-...'}">
+        </label>
+        <div id="ic-p-msg" class="ic-muted" style="font-size:.82rem;min-height:1.2em;"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;">
+            <button type="button" class="outline secondary" style="width:auto;margin:0;"
+                    onclick="document.getElementById('ic-form-slot').innerHTML=''">取消</button>
+            <button type="button" style="width:auto;margin:0;" onclick="icSaveProvider(${id || 0})">
+                ${p ? '保存' : '创建'}</button>
+        </div>
+    </div>`;
+}
+
+async function icSaveProvider(id) {
+    const msg = document.getElementById('ic-p-msg');
+    const name = document.getElementById('ic-p-name').value.trim();
+    const base = document.getElementById('ic-p-base').value.trim();
+    const key = document.getElementById('ic-p-key').value.trim();
+    if (!name) { msg.textContent = '请填写来源名称'; return; }
+    if (!base) { msg.textContent = '请填写 API 地址'; return; }
+    const payload = { name, api_base: base };
+    if (key) payload.api_key = key;
+    if (!id) {
+        if (!key) { msg.textContent = '新增来源必须填写 API Key'; return; }
+        payload.protocol = 'openai';
+    }
+    msg.textContent = '正在保存 ...';
+    try {
+        const r = await fetch(id ? '/models/providers/' + id : '/models/providers', {
+            method: id ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = icErrText(data, r.status); return; }
+        document.getElementById('ic-form-slot').innerHTML = '';
+        icToast(id ? '来源已更新' : '来源已创建');
+        await icLoadProviders();
+        await icLoadModels();
+        await icLoadCatalog();
+    } catch (e) { msg.textContent = '网络错误：' + e; }
+}
+
+async function icDeleteProvider(id) {
+    const p = PROVIDERS.find(x => x.id === id);
+    if (!confirm(`删除来源「${p ? p.name : id}」？其下所有模型会一并删除。`)) return;
+    const r = await fetch('/models/providers/' + id, { method: 'DELETE' });
+    if (r.ok) {
+        icToast('来源已删除');
+        await icLoadProviders();
+        await icLoadModels();
+        await icLoadCatalog();
+    } else {
+        const d = await r.json().catch(() => ({}));
+        icToast(icErrText(d, r.status));
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 模型（models）CRUD
+// ════════════════════════════════════════════════════════════════
+async function icLoadModels() {
+    const box = document.getElementById('ic-model-list');
+    try {
+        const r = await fetch('/models/items');
+        if (!r.ok) { box.textContent = '加载失败（HTTP ' + r.status + '）'; return; }
+        MODELS = await r.json();
+    } catch (e) { box.textContent = '加载失败：' + e; return; }
+    if (!MODELS.length) {
+        box.innerHTML = '<span class="ic-muted">还没有自建模型。先添加来源，再添加模型。</span>';
+        return;
+    }
+    box.innerHTML = MODELS.map(m => `<div style="display:flex;justify-content:space-between;
+        align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid #f0f0f0;">
+        <div style="min-width:0;">
+            <div style="font-weight:600;">${icEsc(m.display_name || m.model_id)}</div>
+            <div class="ic-muted" style="font-size:.76rem;word-break:break-all;">
+                ${icEsc(m.provider_name)} · ${icEsc(m.model_id)}
+                · ¥${m.price_in}/¥${m.price_out}${m.supports_vision ? ' · 可读图' : ''}</div>
+        </div>
+        <div style="display:flex;gap:.35rem;flex-shrink:0;">
+            <button type="button" class="outline" style="width:auto;margin:0;padding:.15rem .55rem;font-size:.76rem;"
+                    onclick="icModelForm(${m.id})">编辑</button>
+            <button type="button" class="outline secondary" style="width:auto;margin:0;padding:.15rem .55rem;font-size:.76rem;"
+                    onclick="icDeleteModel(${m.id})">删除</button>
+        </div>
+    </div>`).join('');
+}
+
+function icModelForm(id) {
+    const m = id ? MODELS.find(x => x.id === id) : null;
+    if (!PROVIDERS.length) {
+        icToast('请先添加一个 API 来源');
+        return;
+    }
+    document.getElementById('ic-form-slot').innerHTML = `<div class="ic-card" style="padding:.9rem 1rem;">
+        <strong style="font-size:.9rem;">${m ? '编辑模型' : '新增模型'}</strong>
+        ${m ? '' : `<label style="margin-top:.5rem;">所属来源
+            <select id="ic-m-provider">${PROVIDERS.map(p =>
+                `<option value="${p.id}">${icEsc(p.name)}</option>`).join('')}</select>
+        </label>`}
+        <label style="margin-top:.5rem;">模型 ID（网关里的名字）
+            <input type="text" id="ic-m-mid" value="${m ? icEsc(m.model_id) : ''}" placeholder="例如：deepseek-chat">
+        </label>
+        <label>展示名
+            <input type="text" id="ic-m-name" value="${m ? icEsc(m.display_name) : ''}" placeholder="留空则显示模型 ID">
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem;">
+            <label>max_tokens<input type="number" id="ic-m-maxtok" min="1" value="${m ? m.max_tokens : 4096}"></label>
+            <label>temperature<input type="number" id="ic-m-temp" step="0.1" min="0" max="2" value="${m ? m.temperature : 0.3}"></label>
+            <label>单价 in（¥/M）<input type="number" id="ic-m-pin" step="0.01" min="0" value="${m ? m.price_in : 0}"></label>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;">
+            <label>单价 out（¥/M）<input type="number" id="ic-m-pout" step="0.01" min="0" value="${m ? m.price_out : 0}"></label>
+            <div style="padding-top:1.6rem;">
+                <label style="display:inline-flex;gap:.4rem;align-items:center;">
+                    <input type="checkbox" id="ic-m-vision" ${m && m.supports_vision ? 'checked' : ''}>
+                    支持读图</label>
+            </div>
+        </div>
+        <p class="ic-muted" style="font-size:.76rem;margin:.2rem 0 .4rem 0;">
+            单价填 0 表示只统计 token 不计费——不填会导致该模型账单恒为 ¥0、预算熔断失效。</p>
+        <div id="ic-m-msg" class="ic-muted" style="font-size:.82rem;min-height:1.2em;"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;">
+            <button type="button" class="outline secondary" style="width:auto;margin:0;"
+                    onclick="document.getElementById('ic-form-slot').innerHTML=''">取消</button>
+            <button type="button" style="width:auto;margin:0;" onclick="icSaveModel(${id || 0})">
+                ${m ? '保存' : '创建'}</button>
+        </div>
+    </div>`;
+}
+
+async function icSaveModel(id) {
+    const msg = document.getElementById('ic-m-msg');
+    const mid = document.getElementById('ic-m-mid').value.trim();
+    if (!mid) { msg.textContent = '请填写模型 ID'; return; }
+    const payload = {
+        model_id: mid,
+        display_name: document.getElementById('ic-m-name').value.trim(),
+        max_tokens: Number(document.getElementById('ic-m-maxtok').value) || 4096,
+        temperature: Number(document.getElementById('ic-m-temp').value) || 0,
+        supports_vision: document.getElementById('ic-m-vision').checked,
+        price_in: Number(document.getElementById('ic-m-pin').value) || 0,
+        price_out: Number(document.getElementById('ic-m-pout').value) || 0,
+    };
+    if (!id) {
+        const sel = document.getElementById('ic-m-provider');
+        payload.provider_id = Number(sel.value);
+    }
+    msg.textContent = '正在保存 ...';
+    try {
+        const r = await fetch(id ? '/models/items/' + id : '/models/items', {
+            method: id ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = icErrText(data, r.status); return; }
+        document.getElementById('ic-form-slot').innerHTML = '';
+        icToast(id ? '模型已更新' : '模型已创建');
+        await icLoadModels();
+        await icLoadProviders();
+        await icLoadCatalog();
+    } catch (e) { msg.textContent = '网络错误：' + e; }
+}
+
+async function icDeleteModel(id) {
+    const m = MODELS.find(x => x.id === id);
+    if (!confirm(`删除模型「${m ? (m.display_name || m.model_id) : id}」？`)) return;
+    const r = await fetch('/models/items/' + id, { method: 'DELETE' });
+    if (r.ok) {
+        icToast('模型已删除');
+        await icLoadModels();
+        await icLoadProviders();
+        await icLoadCatalog();
+    } else {
+        const d = await r.json().catch(() => ({}));
+        icToast(icErrText(d, r.status));
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 页面装配
+// ════════════════════════════════════════════════════════════════
+const newBtn = document.getElementById('ic-new-btn');
+const newForm = document.getElementById('ic-new-form');
+newBtn.addEventListener('click', async () => {
+    const show = newForm.style.display === 'none';
+    newForm.style.display = show ? 'block' : 'none';
+    if (show && !CATALOG) await icLoadCatalog();
+});
+document.getElementById('ic-manage-btn').addEventListener('click', icOpenDrawer);
+document.getElementById('ic-unlock-btn').addEventListener('click', () => {
+    if (CATALOG && CATALOG.unlocked) {
+        if (confirm('内置模型已解锁，要改为上锁吗？')) icDoLock();
+    } else {
+        icOpenUnlock();
+    }
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { icCloseDrawer(); icCloseUnlock(); }
+});
+
+document.getElementById('ic-create-btn').addEventListener('click', async () => {
+    const msg = document.getElementById('ic-new-msg');
+    const topic = document.getElementById('ic-topic').value.trim();
+    if (!topic) { msg.textContent = '请填写调研主题'; return; }
+    const plan = icCollectPlan();
+    if (!Object.keys(plan).length) {
+        msg.textContent = '没有可用模型：请先解锁内置模型，或添加自己的来源与模型。';
+        return;
+    }
+    const payload = {
+        topic,
+        dimensions: document.getElementById('ic-dimensions').value.trim(),
+        constraints: document.getElementById('ic-constraints').value.trim(),
+        model_plan: plan,
+    };
+    const budgetRaw = document.getElementById('ic-budget').value.trim();
+    if (budgetRaw !== '') {
+        const budget = Number(budgetRaw);
+        if (!Number.isFinite(budget) || budget <= 0) {
+            msg.textContent = '预算上限需为正数，或留空使用全局默认'; return;
+        }
+        payload.budget_limit = budget;
+    }
+    msg.textContent = '正在预检模型连通性并启动 ...';
+    try {
+        const r = await fetch('/research/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = icErrText(data, r.status); return; }
+        location.href = '/tasks/' + data.task_id;
+    } catch (e) {
+        msg.textContent = '网络错误：' + e;
+    }
+});
+</script>
+{% endblock %}

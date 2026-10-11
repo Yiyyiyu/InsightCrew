@@ -1,13 +1,117 @@
-# InsightCrew Docker Compose（开发版，不含 Postgres/Redis）
-# 生产版见 PRD §3.3
+# InsightCrew 生产栈：nginx（唯一对公网开放）→ api → redis ↔ worker
+#
+# 用法（在仓库根、且已 cp .env.example .env 并填好 Key 之后）：
+#   docker compose up -d --build
+#   curl http://<服务器IP>/healthz
+#
+# 本机开发请用 scripts/dev.ps1（直接跑 uvicorn + worker，不进容器）。
+# 若确实要用容器开发，另建 docker-compose.override.yml（已被 .gitignore 忽略）覆盖挂载与 --reload。
+#
+# 4C4G 约束：全部服务都设了 mem_limit；日志限制 max-size=10m / max-file=3。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
+  redis:
+    # 与本机开发用的 insightcrew-redis 统一到同一版本，避免多留一份镜像
+    image: redis:7.4
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save ""
+    mem_limit: 256m
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+
   api:
     build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+    # ★ 与 worker 指向同一个镜像名：否则 compose 会把同一份 Dockerfile
+    #   构建两次、打两个 tag（各 ~1.98GB，实际共享层、只多 13KB 元数据）。
+    #   写明 image 后只构建一次，两个服务复用。
+    image: multiagent-team:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # ★ 不用默认的 `./insightcrew.db`：容器内 CWD 是 /app，
+      #   必须落到与 worker 共享的命名卷，否则两个容器各写各的库。
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/insightcrew.db"
+      # ★ 必须覆盖 .env 里的 `redis://localhost:6379/0`：
+      #   容器内 localhost 是容器自己，不是 redis 服务。
+      REDIS_URL: "redis://redis:6379/0"
+      # 容器内不加载 .env 之外的东西；显式关掉 mock（生产绝不允许假模型）
+      MOCK_LLM: "0"
+      APP_ENV: "production"
+      # 前置 nginx，可信代理头
+      TRUST_PROXY: "1"
     volumes:
-      - .:/app
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+      - db-data:/app/data
+    # ★ 只绑本机回环：公网入口只有 nginx，api 不直接暴露
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 1g
+    logging: *default-logging
+
+  worker:
+    build: .
+    # ★ 与 api 同一个镜像名，只构建一次（见 api 服务注释）
+    image: multiagent-team:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/insightcrew.db"
+      REDIS_URL: "redis://redis:6379/0"
+      MOCK_LLM: "0"
+      APP_ENV: "production"
+    command: ["python", "-m", "src.core.worker"]
+    volumes:
+      # ★ 必须与 api 共享同一个库文件：api 写任务、worker 读任务
+      - db-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # arq worker 每 30s 写一次 arq:queue:health-check（TTL=interval+1），键在即健康。
+      # ★ 不能用 redis-cli：镜像是 python:3.11-slim，里面没有 redis 工具；
+      #   用镜像里必然存在的 python + redis 包来查（redis 是本项目依赖）。
+      test: ["CMD-SHELL", "python -c \"import redis,sys; sys.exit(0 if redis.from_url('redis://redis:6379/0').exists('arq:queue:health-check') else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 2g
+    logging: *default-logging
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+    mem_limit: 128m
+    logging: *default-logging
+
+volumes:
+  db-data:
+  redis-data:

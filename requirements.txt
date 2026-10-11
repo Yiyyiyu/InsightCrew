@@ -32,6 +32,8 @@ passlib[bcrypt]>=1.7,<2.0
 beautifulsoup4>=4.12,<5.0
 lxml>=5.2,<6.0
 trafilatura>=1.10,<2.0
+# PDF 解析与图表抽取（import 名为 fitz，pymupdf 1.24 起同时提供 pymupdf 顶层名）
+PyMuPDF>=1.24,<2.0
 
 # === 前端模板 ===
 jinja2>=3.1,<4.0
@@ -47,3 +49,6 @@ pydantic-settings>=2.3,<3.0
 # loguru/rich 由 crewai 及其依赖自动引入，不在此锁定版本
 loguru
 rich
+# 注：pytest / pytest-asyncio 属测试依赖，测试套件只在本机跑（/tests/ 不入仓库），
+#     故不列在此文件。本机需要时手动安装：
+#     pip install pytest pytest-asyncio

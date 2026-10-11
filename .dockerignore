@@ -1,0 +1,53 @@
+# 构建镜像时排除的东西 —— 目标：镜像里只有产品运行时代码。
+# ★ 绝不能排除 migrations/ 、alembic.ini 、config/ 、src/ ：启动时 init_db() 要跑 Alembic。
+
+# 文档与本地资产（按用户判据：测试/调试资产只在本地）
+Markdown/
+tools/
+tests/
+scripts/
+pytest.ini
+
+# 版本控制与 IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 数据库文件（容器内用卷里的库，不能把开发库打进镜像）
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite3
+
+# 密钥：绝不进镜像（容器运行时用 env_file 注入）
+.env
+
+# 运行时产物与缓存
+.cache/
+.crewai/
+.dev-home/
+logs/
+*.log
+crewai_settings.json
+
+# 本地 compose 覆盖
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db

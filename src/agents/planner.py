@@ -1,38 +1,46 @@
-"""Planner — 调研规划师"""
+"""Planner — 调研规划师
+
+提示词外置在 `src/prompts/planner.yaml`（M1 遗留项 1）。
+改提示词只改 YAML，不用动本文件、不用重启进程（loader 按 mtime 热加载）。
+"""
 
 from crewai import Agent, Task
 
+from src.prompts import agent_block, task_block
+
 
 def create_planner(llm: dict = None) -> Agent:
+    spec = agent_block("planner")
     return Agent(
-        role="调研规划师",
-        goal="将用户的研究课题拆解为结构化的调研计划，确定检索关键词、对比维度和预期产出",
+        role=spec["role"],
+        goal=spec["goal"],
         llm=llm,
-        backstory=(
-            "你是经验丰富的技术调研专家，擅长将模糊的研究方向转化为清晰的调研路线图。"
-            "你制定的计划涵盖：调研目标、核心问题、检索策略（中英文关键词）、"
-            "对比维度、预期产出结构。你的计划是后续所有Agent的工作纲领。"
-        ),
+        backstory=spec["backstory"],
         verbose=True,
         allow_delegation=False,
     )
 
 
-def create_plan_task(agent: Agent, topic: str) -> Task:
+def create_plan_task(
+    agent: Agent,
+    topic: str,
+    dimensions: str = "",
+    constraints: str = "",
+) -> Task:
+    """构造调研规划任务。
+
+    `dimensions` / `constraints` 由用户在新建任务时填写（M1 遗留项 5）。
+    留空时填入「（未指定，由你自行判断）」而不是让 `$dimensions` 字面量
+    留在提示词里——loader 用的是 `safe_substitute`，缺变量会原样保留。
+    """
+    spec = task_block(
+        "planner",
+        topic=topic,
+        dimensions=(dimensions or "").strip() or "（未指定，由你自行判断）",
+        constraints=(constraints or "").strip() or "（未指定）",
+    )
     return Task(
-        description=(
-            f"课题：{topic}\n\n"
-            "请制定一份结构化的多Agent协作调研计划，包含：\n"
-            "1. 调研目标与核心问题\n"
-            "2. 关键对比维度（至少5个维度）\n"
-            "3. 中英文检索关键词（至少3组）\n"
-            "4. 目标信息来源（arXiv、GitHub、技术博客等）\n"
-            "5. 预期报告结构大纲\n\n"
-            "输出格式为 Markdown。"
-        ),
-        expected_output=(
-            "一份完整的 Markdown 格式调研计划，包含上述五个部分，"
-            "每个部分有 2-5 个要点。"
-        ),
+        description=spec["description"],
+        expected_output=spec["expected_output"],
         agent=agent,
     )

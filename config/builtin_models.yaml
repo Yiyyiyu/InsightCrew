@@ -1,0 +1,110 @@
+# InsightCrew 内置模型目录（只读，无 API 可修改）
+#
+# ★ 为什么单独一个文件：内置模型是「写死的」（用户 m13063 要求），
+#   必须与用户自建的 providers/models 表严格分开——
+#   这份文件里的任何一条都不会被任何接口改写。
+#
+# ★ 内置模型默认「锁定」：所有用户（含站长本人）初始都是锁上的，
+#   必须各自输入 .env 的 BUILTIN_UNLOCK_PASSWORD 才能解锁使用
+#   （解锁态按 user_id 存在 builtin_unlocks 表，互不影响）。
+#   未解锁用户的目录里根本不出现下面这些条目。
+#
+# ★ 这里的模型用的是站长 .env 里的 Key（api_key_env 指定），
+#   所以未解锁的用户看到不到、也选不到它们。
+#
+# 字段说明：
+#   display_name     前端展示名
+#   litellm          实际发给 LiteLLM 的模型串（provider 前缀 + 模型名）
+#   api_key_env      Key 所在的环境变量名（.env 注入 os.environ）
+#   api_base         可选，自定义网关地址（留空则用 provider 默认）
+#   api_base_env     可选，从环境变量取 api_base（优先级高于 api_base）
+#   max_tokens       默认最大输出 token
+#   temperature      默认温度
+#   supports_vision  是否支持读图（决定它能否出现在「读图模型」下拉里）
+#   disable_thinking 关闭思考模式（思考型视觉模型会把 max_tokens 耗在
+#                    reasoning_tokens 上，导致 content 返回空串）
+#   price_in/out     单价（人民币元 / 百万 token）；0 = 只记 token 不计费
+#   fallback         可选，读图失败时回落的另一个内置档 id
+
+builtin_models:
+  deepseek-flash:
+    display_name: "DeepSeek Flash"
+    litellm: "deepseek/deepseek-flash"
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 4096
+    temperature: 0.3
+    supports_vision: true
+    disable_thinking: false
+    price_in: 0.5
+    price_out: 2.0
+
+  deepseek-pro:
+    display_name: "DeepSeek Pro"
+    litellm: "deepseek/deepseek-v4-pro"
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+    temperature: 0.2
+    supports_vision: false
+    disable_thinking: false
+    price_in: 4.0
+    price_out: 12.0
+
+  glm-4v-flash:
+    display_name: "GLM-4V Flash"
+    # ★ 免费档（实测 10/10 成功，0.7–2.5s）。上下文仅 4K，
+    #   1600×1200 大图实测 prompt_tokens=2536，再大即溢出。
+    litellm: "zai/glm-4v-flash"
+    api_key_env: ZHIPU_API_KEY
+    max_tokens: 1024
+    temperature: 0.1
+    supports_vision: true
+    disable_thinking: true
+    price_in: 0.0
+    price_out: 0.0
+    fallback: glm-4v-plus
+
+  glm-4v-plus:
+    display_name: "GLM-4V Plus"
+    # 兜底：付费但稳定（实测 6/6，16K 上下文，可承载大图）。
+    litellm: "zai/glm-4v-plus"
+    api_key_env: ZHIPU_API_KEY
+    max_tokens: 2048
+    temperature: 0.1
+    supports_vision: true
+    disable_thinking: false
+    price_in: 4.0
+    price_out: 4.0
+
+  gpt-4o-mini:
+    display_name: "GPT-4o mini"
+    # 走 linoapi 代理，必须显式传 api_base。
+    litellm: "openai/gpt-4o-mini"
+    api_key_env: OPENAI_API_KEY
+    api_base: "https://linoapi.com.cn/v1"
+    api_base_env: OPENAI_API_BASE
+    max_tokens: 4096
+    temperature: 0.3
+    supports_vision: true
+    disable_thinking: false
+    price_in: 1.1
+    price_out: 4.4
+
+# ── 默认角色分配（解锁后新建任务表单的初始值）──
+# 6 个 Agent 角色 + 1 个读图档。用户可在表单里逐项改。
+# 未解锁的用户不用这份默认值，改为用他自己添加的第一个模型。
+default_plan:
+  Planner: deepseek-pro
+  Researcher: deepseek-flash
+  Analyst: deepseek-pro
+  Critic: deepseek-pro
+  Writer: deepseek-flash
+  Reviewer: deepseek-pro
+  vision: glm-4v-flash
+
+# ── per-Agent 生成参数覆盖（与档位无关，按角色生效）──
+overrides:
+  Writer:
+    max_tokens: 8000
+    temperature: 0.4
+  Critic:
+    temperature: 0.7

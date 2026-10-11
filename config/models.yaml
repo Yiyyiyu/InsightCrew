@@ -1,7 +1,13 @@
-# InsightCrew 模型路由配置
+# InsightCrew 模型路由配置（**开发/测试默认目录**）
 # 详见 PRD §6 模型路由
+#
+# ★ M2.5 起本文件不再是生产模型来源：生产由用户逐角色选定 `model_plan`
+#   （内置在 config/builtin_models.yaml，自建存 providers/models 表）。
+#   本文件的 models/overrides 只在「无任务上下文」（开发脚本、pytest）时
+#   作为回落目录被 `router.route()` 使用。
+#   `strategy` / `routing` 两个键已随 M2.5-7 删除（前者是死配置、
+#   后者被 model_plan 取代，全仓库已无消费者）。
 
-strategy: heterogeneous
 default_model: main
 
 models:
@@ -16,9 +22,24 @@ models:
     max_tokens: 8192
     temperature: 0.2
   vision:
+    # ★ 免费模型（实测 10/10 成功，0.7–2.5s）。官方定价「免费/免费」。
+    #   限制：上下文仅 4K（1600×1200 大图实测 prompt_tokens=2536，再大即溢出）。
+    #   fallback 指定读图失败时回落的档位（见 src/tools/vision.py）。
+    litellm: "zai/glm-4v-flash"
+    api_key_env: ZHIPU_API_KEY
+    max_tokens: 1024
+    temperature: 0.1
+    fallback: vision_fallback
+    # 关闭思考模式（实测有效，输出从 64 token 降到 20）。对非思考模型无害，
+    # 留着可防止日后换成思考型视觉模型时出现「成功但 content 为空」。
+    disable_thinking: true
+  vision_fallback:
+    # 兜底：付费但稳定（实测 6/6，16K 上下文，可承载大图）。
+    # 不是 routing 规则的目标，只由 vision.py 在 vision 档失败时显式调用。
     litellm: "zai/glm-4v-plus"
     api_key_env: ZHIPU_API_KEY
     max_tokens: 2048
+    temperature: 0.1
   premium:
     litellm: "openai/gpt-4o-mini"
     api_key_env: OPENAI_API_KEY
@@ -30,20 +51,38 @@ models:
   #   api_key_env: DASHSCOPE_API_KEY
   #   max_tokens: 8192
 
-fallback_chain: [main, premium]
+# 兜底链：★ M2.5-7 起文本链路的「运行时跨厂商降级」已整体删除
+#   （`crewai.LLM` 没有可用的 fallbacks 参数；执行到一半换模型会让账单与结果
+#   不可解释）。取代它的是建任务前的 preflight 连通性预检（src/core/preflight.py）。
+#   本键现仅由 `fallback_models()` 提供「档位自带 fallback 之外」的兜底查询，
+#   生产链路不再消费它。vision 档位用的是它自己的 `fallback: vision_fallback`。
+fallback_chain: [reasoner, main, premium]
 budget:
   per_task_limit_cny: 5.0
   on_exceed: abort
 
-routing:
-  - when: { modality: vision }
-    use: vision
-  - when: { agent: [Planner, Analyst, Critic, Reviewer] }
-    use: reasoner
-  - when: { task_kind: long_context }
-    use: main
-  - when: { agent: Writer }
-    use: main
+# ── 计费单价（人民币元 / 百万 token）──
+# 用途：把实测 token 数折算成成本，写入 llm_calls.cost_cny 并累加到
+# tasks.total_cost_cny，超 budget.per_task_limit_cny 时熔断。
+# ★ 单价随厂商调价会变，上线前请按各厂商最新价目核对后修改；
+#   键名与上面 models 的键一一对应，缺省为 0（只记 token 不记钱）。
+pricing:
+  main:      { input: 0.5,  output: 2.0 }    # deepseek-flash
+  reasoner:  { input: 4.0,  output: 12.0 }   # deepseek-v4-pro
+  # vision 档是免费模型，单价 0（记账仍会写 token 数，金额为 0）。
+  # 若日后换成付费视觉模型，这里必须同步改，否则读图成本会漏记。
+  vision:    { input: 0.0,  output: 0.0 }    # zai/glm-4v-flash（官方免费）
+  vision_fallback: { input: 4.0, output: 4.0 }  # zai/glm-4v-plus
+  premium:   { input: 1.1,  output: 4.4 }    # openai/gpt-4o-mini（按 7.3 汇率折算）
+
+# ★ 备选免费视觉模型实测记录（2026-10-09，同一账号同一 Key）：
+#   glm-4.6v-flash          官方「免费/免费」，能识图（6/6），但实测
+#                           连续 10 次全 429 code 1305「访问量过大」，
+#                           带 5 次退避重试后 6 个请求仅成功 2 个 → 不可用。
+#                           且是思考模型：max_tokens 小时 reasoning_tokens
+#                           会吃光预算、content 返回空串（"成功但无内容"）。
+#   glm-4.1v-thinking-flash 官方「免费/免费」，64K 上下文，实测 3/6（限流）。
+#   glm-4v-flash            官方「免费/免费」，实测 10/10，故选它为主用。
 
 overrides:
   Writer:

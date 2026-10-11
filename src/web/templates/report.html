@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}报告 · {{ task.topic }}{% endblock %}
+{% block content %}
+<p class="ic-muted" style="margin-bottom:.3rem;">
+    <a href="/tasks">← 任务列表</a> ·
+    <a href="/tasks/{{ task.id }}">任务详情</a> ·
+    <a href="/tasks/{{ task.id }}/evidence">证据台账</a>
+</p>
+<h2 style="margin-bottom:.3rem;">{{ task.topic }}</h2>
+<p class="ic-muted">
+    最终报告 · 引用角标 <code>[S3#12]</code> 可点击查看原文片段
+</p>
+
+<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <button class="outline" style="width:auto;margin:0;" onclick="icExportMd()">导出 Markdown</button>
+    <button class="outline secondary" style="width:auto;margin:0;" onclick="icCopyBibtex()">复制 BibTeX</button>
+    <button class="outline secondary" style="width:auto;margin:0;" onclick="icPrint()">打印 / 存 PDF</button>
+</div>
+
+<article id="ic-report-body" class="ic-report"></article>
+
+<details class="ic-card" style="margin-top:1.4rem;">
+    <summary>BibTeX（参考文献）</summary>
+    <pre class="ic-md" id="ic-bibtex">{{ bibtex or '（无）' }}</pre>
+</details>
+
+<!-- 证据抽屉 -->
+<div id="ic-drawer" class="ic-drawer">
+    <div class="ic-drawer-head">
+        <strong id="ic-drawer-title">证据</strong>
+        <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
+                onclick="icCloseDrawer()">✕</button>
+    </div>
+    <div id="ic-drawer-body"></div>
+</div>
+<div id="ic-drawer-mask" class="ic-drawer-mask" onclick="icCloseDrawer()"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script>
+const TASK_ID = {{ task.id }};
+const RAW_MD = {{ content_md | tojson }};
+const EVIDENCE = {{ evidence_map | tojson }};
+
+// 引用角标 → 可点击按钮。marked 会把 [S3#12] 当普通文本，这里渲染后再包一层。
+function decorateCitations(html) {
+    return html.replace(/\[S(\d+)#(\d+)\]/g, (m, sid, seq) => {
+        const key = `[S${sid}#${seq}]`;
+        const has = EVIDENCE[key] ? 'ic-cite' : 'ic-cite ic-cite-missing';
+        return `<button class="${has}" data-key="${key}" title="查看证据">${key}</button>`;
+    });
+}
+
+const body = document.getElementById('ic-report-body');
+body.innerHTML = decorateCitations(marked.parse(RAW_MD || ''));
+
+body.addEventListener('click', ev => {
+    const btn = ev.target.closest('.ic-cite');
+    if (btn) icOpenDrawer(btn.dataset.key);
+});
+
+// ── 证据抽屉 ──
+function icOpenDrawer(key) {
+    const d = EVIDENCE[key];
+    document.getElementById('ic-drawer-title').textContent = key;
+    const el = document.getElementById('ic-drawer-body');
+    if (!d) {
+        el.innerHTML = `<p class="ic-muted">该标记未在证据台账中找到对应记录
+            —— 可能来自摘要级引用或已被清理，请以证据台账页为准。</p>`;
+    } else {
+        el.innerHTML = `
+            ${d.title ? `<p><strong>${icEsc(d.title)}</strong></p>` : ''}
+            <p class="ic-snippet">来源：<a href="${icEsc(d.url)}" target="_blank"
+                rel="noopener noreferrer">${icEsc(d.url)}</a></p>
+            <p class="ic-snippet">抓取时间：${icEsc(d.fetched_at || '未知')}
+                ${d.page_num ? ` · 第 ${d.page_num} 页` : ''}</p>
+            <hr>
+            <p style="font-size:.88rem;">${icEsc(d.snippet || '（无片段）')}</p>`;
+    }
+    document.getElementById('ic-drawer').classList.add('open');
+    document.getElementById('ic-drawer-mask').classList.add('open');
+}
+function icCloseDrawer() {
+    document.getElementById('ic-drawer').classList.remove('open');
+    document.getElementById('ic-drawer-mask').classList.remove('open');
+}
+function icEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') icCloseDrawer(); });
+
+// ── 导出 ──
+function icDownload(name, text, mime) {
+    const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+function icExportMd() {
+    icDownload(`report-task${TASK_ID}.md`, RAW_MD || '');
+    icToast('已导出 Markdown');
+}
+function icCopyBibtex() {
+    const txt = document.getElementById('ic-bibtex').textContent;
+    navigator.clipboard.writeText(txt)
+        .then(() => icToast('BibTeX 已复制'))
+        .catch(() => icToast('复制失败，请手动选中'));
+}
+function icPrint() { window.print(); }
+</script>
+{% endblock %}

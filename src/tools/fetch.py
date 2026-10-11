@@ -2,9 +2,14 @@
 
 ★ 引用台账：正文按段落切块写入 sources/chunks，
   返回文本中每个分块都带真实存在的 [S{source_id}#{chunk_seq}] 标记。
+
+★ SSRF 防护：URL 来自 Agent（可能被检索结果或用户输入诱导），
+  必须走 src.core.net 的出站校验，不能直接 urlopen——
+  否则 `http://169.254.169.254/...` 这类地址会让服务器自己去读云凭据。
 """
 
 from src.core.ledger import add_source, chunk_text
+from src.core.net import UnsafeUrlError, safe_urlopen
 from crewai.tools import tool
 
 _UA = {
@@ -16,12 +21,15 @@ _FETCH_TIMEOUT = 12   # 原 30s 太宽松：坏 URL 会白等 30s 并被 Agent �
 @tool("fetch_webpage")
 def fetch_webpage(url: str) -> str:
     """抓取网页正文内容。输入: 完整 URL。"""
-    import urllib.request, trafilatura
+    import trafilatura
 
-    req = urllib.request.Request(url, headers=_UA)
     try:
-        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as r:
+        with safe_urlopen(url, headers=_UA, timeout=_FETCH_TIMEOUT) as r:
             html = r.read().decode("utf-8", "replace")
+    except UnsafeUrlError as e:
+        # 安全拒绝：明确告知不可重试，且不泄露"为什么被拒"的内部细节
+        return (f"该 URL 不被允许抓取（{e}）。"
+                "请勿重试同一 URL，改用其他公开来源。")
     except Exception as e:
         return (f"抓取失败（{type(e).__name__}: {e}）。"
                 "请勿重试同一 URL，改用其他来源。")
