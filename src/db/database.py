@@ -38,6 +38,13 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("tasks", "model_plan", "TEXT"),
     # 闸门收敛：用户请求在下一个阶段边界暂停（1 = 已请求）
     ("tasks", "pause_requested", "INTEGER DEFAULT 0"),
+    # 独立注册页：邮箱可选（唯一但允许 NULL，老账号 demo 不受影响）
+    ("users", "email", "TEXT"),
+    # 找回密码：改密后作废旧 JWT（老库补列，默认 0）
+    ("users", "token_version", "INTEGER NOT NULL DEFAULT 0"),
+    # 邮箱验证（用户 m26742）：非空才表示邮箱真的归用户所有。
+    # 老库补列后为 NULL —— 既有用户需要重新验证一次邮箱。
+    ("users", "email_verified_at", "DATETIME"),
 ]
 
 # 已废弃、需要从老库删掉的列（M2.5-7 清理）。

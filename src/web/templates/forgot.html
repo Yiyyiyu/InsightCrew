@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}找回密码 · InsightCrew{% endblock %}
+{% block content %}
+<div class="ic-auth-wrap">
+    <div class="ic-auth-card">
+        <div class="ic-auth-head">
+            <div class="ic-auth-logo">找回密码</div>
+            <p class="ic-muted" style="margin:.3rem 0 0 0;">我们会把重置链接发到你的邮箱</p>
+        </div>
+
+        <form id="ic-forgot-form" onsubmit="return false;">
+            <label>邮箱或用户名
+                <input type="text" id="account" name="account" autocomplete="username"
+                       placeholder="注册时填写的邮箱，或你的用户名" required>
+            </label>
+
+            <label>验证码
+                <div class="ic-captcha-row">
+                    <input type="text" id="captcha" name="captcha" autocomplete="off"
+                           maxlength="4" placeholder="输入右侧字符" required>
+                    <img id="ic-captcha-img" class="ic-captcha-img" alt="验证码，点击可刷新"
+                         title="看不清？点击刷新">
+                </div>
+                <small class="ic-field-hint">看不清可点击图片刷新</small>
+            </label>
+
+            <button type="submit" id="ic-forgot-btn" class="ic-cta" style="margin-top:.4rem;">
+                发送重置链接
+            </button>
+        </form>
+
+        <div id="ic-result" class="ic-result" style="display:none;"></div>
+
+        <p class="ic-muted" style="margin-top:1rem;text-align:center;">
+            <a href="/login">返回登录</a>
+        </p>
+        <div id="ic-msg" class="ic-msg"></div>
+    </div>
+    <p class="ic-auth-foot">
+        7 阶段流水线 · 3 道人工闸门 · 全链路引用可追溯
+    </p>
+</div>
+<style>
+    .ic-auth-wrap { max-width: 440px; margin: 5vh auto 0 auto; }
+    .ic-auth-card {
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: 16px; padding: 2rem 1.9rem 1.6rem 1.9rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .05), 0 20px 50px -20px rgba(15, 23, 42, .25);
+    }
+    .ic-auth-head { text-align: center; margin-bottom: 1.5rem; }
+    .ic-auth-logo {
+        display: inline-block; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+        background: linear-gradient(120deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .ic-field-hint {
+        display: block; margin-top: .25rem; font-size: .75rem; color: var(--ic-ink-3);
+        line-height: 1.35;
+    }
+    .ic-captcha-row { display: flex; gap: .6rem; align-items: stretch; }
+    .ic-captcha-row input { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+    .ic-captcha-img {
+        flex: 0 0 132px; width: 132px; height: 44px; border-radius: 8px;
+        border: 1px solid var(--ic-line); background: var(--ic-line-soft);
+        cursor: pointer; object-fit: cover;
+    }
+    .ic-result {
+        margin-top: 1rem; padding: .8rem .95rem; border-radius: 10px;
+        font-size: .85rem; line-height: 1.6;
+        background: var(--ic-accent-soft); border: 1px solid var(--ic-accent-line);
+        color: var(--ic-accent-dark);
+    }
+    .ic-msg {
+        margin-top: .8rem; font-size: .85rem; text-align: center;
+        color: var(--ic-err); min-height: 1.2em;
+    }
+    .ic-msg:empty { min-height: 0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const msg = document.getElementById('ic-msg');
+    const btn = document.getElementById('ic-forgot-btn');
+    let captchaId = '';
+
+    async function icLoadCaptcha() {
+        try {
+            const r = await fetch('/auth/captcha');
+            const d = await r.json();
+            captchaId = d.captcha_id || '';
+            document.getElementById('ic-captcha-img').src = d.image || '';
+        } catch (e) {
+            msg.textContent = '验证码加载失败，请刷新页面';
+        }
+    }
+
+    document.getElementById('ic-captcha-img').addEventListener('click', () => {
+        // 换一张的同时清空输入，避免旧答案配新图
+        document.getElementById('captcha').value = '';
+        icLoadCaptcha();
+    });
+
+    document.getElementById('ic-forgot-form').addEventListener('submit', async () => {
+        const account = document.getElementById('account').value.trim();
+        const captcha = document.getElementById('captcha').value.trim();
+        msg.textContent = '';
+        if (!account) { msg.textContent = '请填写邮箱或用户名'; return; }
+        if (!captcha) { msg.textContent = '请填写验证码'; return; }
+
+        btn.disabled = true;
+        btn.textContent = '发送中 ...';
+        try {
+            const r = await fetch('/auth/forgot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account, captcha_id: captchaId, captcha })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                // 验证码错误要真实报错，并自动换一张 —— 否则用户会拿同一个
+                // 已经作废的验证码反复重试
+                const det = d.detail;
+                msg.textContent = (det && det.message) || det || ('失败：HTTP ' + r.status);
+                document.getElementById('captcha').value = '';
+                icLoadCaptcha();
+                return;
+            }
+            // 成功：显示统一文案，并隐藏表单（防重复提交）
+            const box = document.getElementById('ic-result');
+            box.textContent = d.msg || '已发送，请查收邮件';
+            box.style.display = 'block';
+            document.getElementById('ic-forgot-form').style.display = 'none';
+        } catch (e) {
+            msg.textContent = '网络错误：' + e;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '发送重置链接';
+        }
+    });
+
+    icLoadCaptcha();
+</script>
+{% endblock %}

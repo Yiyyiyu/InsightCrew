@@ -1,52 +1,142 @@
 {% extends "base.html" %}
 {% block title %}证据台账 · {{ task.topic }}{% endblock %}
 {% block content %}
-<p class="ic-muted" style="margin-bottom:.3rem;">
-    <a href="/tasks">← 任务列表</a> ·
-    <a href="/tasks/{{ task.id }}">任务详情</a>
-</p>
-<h2 style="margin-bottom:.3rem;">证据台账</h2>
-<p class="ic-muted">{{ task.topic }} · 共 {{ claims|length }} 条论断</p>
+<style>
+    .ic-ev-head { margin-bottom: 1.1rem; }
+    .ic-ev-head h2 { margin: .35rem 0 .3rem 0; letter-spacing: -.02em; }
+    .ic-crumb { font-size: .86rem; color: var(--ic-ink-2); }
+    .ic-crumb a { color: var(--ic-ink-2); text-decoration: none; }
+    .ic-crumb a:hover { color: var(--ic-accent); }
+    .ic-legend {
+        display: flex; gap: .7rem; align-items: center; flex-wrap: wrap;
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: var(--ic-radius); padding: .8rem 1.05rem;
+        margin-bottom: 1.2rem; font-size: .86rem; color: var(--ic-ink-2);
+    }
+    .ic-claim-text { font-size: .95rem; line-height: 1.7; }
+    /* ═══ 检索区：搜索 + 等级筛选 + 全展开/收起 ═══ */
+    .ic-ev-tools {
+        display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: var(--ic-radius); padding: .8rem 1rem;
+        margin-bottom: .9rem; box-shadow: var(--ic-shadow-sm);
+    }
+    .ic-ev-search { position: relative; flex: 1 1 15rem; }
+    .ic-ev-search > svg {
+        position: absolute; left: .6rem; top: 50%; transform: translateY(-50%);
+        color: var(--ic-ink-3); pointer-events: none;
+    }
+    .ic-ev-search input { margin: 0; padding-left: 2.05rem; }
+    .ic-level-btns { display: flex; gap: .3rem; }
+    .ic-level-btns button {
+        width: auto; margin: 0; padding: .3rem .8rem; font-size: .82rem;
+        border-radius: 999px;
+    }
+    .ic-level-btns button.active {
+        background: var(--ic-accent); border-color: var(--ic-accent); color: #fff;
+    }
+    .ic-ev-tools .ic-ev-count { font-size: .8rem; color: var(--ic-ink-3); margin-left: auto; }
+    /* ═══ 单条论断：整块可折叠 ═══ */
+    details.ic-claim > summary {
+        cursor: pointer; list-style: none; display: flex;
+        align-items: flex-start; gap: .7rem;
+    }
+    details.ic-claim > summary::-webkit-details-marker { display: none; }
+    details.ic-claim > summary::before {
+        content: "▸"; color: var(--ic-ink-3); flex: none;
+        transition: transform .15s ease; margin-top: .1rem;
+    }
+    details.ic-claim[open] > summary::before { transform: rotate(90deg); }
+    .ic-claim-brief {
+        flex: 1; min-width: 0; font-size: .9rem; line-height: 1.55;
+        color: var(--ic-ink-2);
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    details.ic-claim[open] .ic-claim-brief { display: none; }
+    .ic-claim-body { margin-top: .75rem; }
+    .ic-claim-hidden { display: none !important; }
+</style>
+<div class="ic-ev-head">
+    <p class="ic-crumb" style="margin-bottom:.35rem;">
+        <a href="/tasks">← 任务列表</a> ·
+        <a href="/tasks/{{ task.id }}">任务详情</a>
+    </p>
+    <h2>证据台账</h2>
+    <p class="ic-muted" style="margin:0;">{{ task.topic }} · 共 {{ claims|length }} 条论断</p>
+</div>
 
-<p class="ic-muted">
-    证据分级：<span class="badge badge-done">A 全文验证</span>
+<div class="ic-legend">
+    <span>证据分级：</span>
+    <span class="badge badge-done">A 全文验证</span>
     <span class="badge badge-running">B 摘要级</span>
     <span class="badge badge-pending">C 待复核</span>
-    —— A 来自整页抓取/PDF 正文，B 来自搜索摘要，两者都可回溯到原始 URL。
-</p>
+    <span class="ic-muted">—— A 来自整页抓取/PDF 正文，B 来自搜索摘要，两者都可回溯到原始 URL。</span>
+</div>
 
 {% if claims %}
-    {% for c in claims %}
-    <div class="ic-card">
-        <div style="display:flex;gap:.6rem;align-items:flex-start;">
-            <span class="badge {{ 'badge-done' if c.level == 'A' else 'badge-running' if c.level == 'B' else 'badge-pending' }}"
-                  title="证据等级">{{ c.level }}</span>
-            <div style="flex:1;">
-                <div style="font-size:.95rem;">{{ c.text }}</div>
-                {% if c.evidence %}
-                    <div style="margin-top:.6rem;">
-                        {% for e in c.evidence %}
-                        <div class="ic-ev">
-                            <div>
-                                <code>{{ e.marker }}</code>
-                                {% if e.title %}· {{ e.title }}{% endif %}
-                                {% if e.page_num %}· 第 {{ e.page_num }} 页{% endif %}
-                            </div>
-                            <div><a href="{{ e.url }}" target="_blank" rel="noopener noreferrer"
-                                    class="ic-snippet">{{ e.url }}</a></div>
-                            {% if e.snippet %}
-                            <div class="ic-snippet" style="margin-top:.3rem;">{{ e.snippet }}</div>
-                            {% endif %}
-                        </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="ic-muted" style="margin-top:.4rem;">该论断暂无关联证据（待复核）</div>
-                {% endif %}
-            </div>
+    <!-- 检索区（用户 m25143 第 6 项）：按等级筛选 + 关键词搜索，全部在前端做，
+         因为这一页的论断已随页面一次性下发，再回服务端筛一次只是多一次往返。 -->
+    <div class="ic-ev-tools">
+        <div class="ic-ev-search">
+            <svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+            <input type="text" id="ic-ev-q" placeholder="搜索论断、文献地址、摘要关键词…"
+                   aria-label="搜索证据">
         </div>
+        <div class="ic-level-btns" role="group" aria-label="按证据等级筛选">
+            <button type="button" class="outline secondary active" data-level="all">全部</button>
+            <button type="button" class="outline secondary" data-level="A">A</button>
+            <button type="button" class="outline secondary" data-level="B">B</button>
+            <button type="button" class="outline secondary" data-level="C">C</button>
+        </div>
+        <button type="button" class="outline secondary" id="ic-ev-toggle"
+                style="width:auto;margin:0;padding:.3rem .8rem;font-size:.82rem;">全部展开</button>
+        <span class="ic-ev-count" id="ic-ev-count"></span>
     </div>
+
+    <div id="ic-claim-list">
+    {% for c in claims %}
+    <details class="ic-card ic-claim" data-idx="{{ loop.index0 }}" data-level="{{ c.level }}">
+        <summary>
+            <span class="badge {{ 'badge-done' if c.level == 'A' else 'badge-running' if c.level == 'B' else 'badge-pending' }}"
+                  title="证据等级" style="margin-top:.1rem;">{{ c.level }}</span>
+            <span class="ic-claim-brief">{{ c.text }}</span>
+        </summary>
+        <div class="ic-claim-body">
+            <div class="ic-claim-text">{{ c.text }}</div>
+            {% if c.evidence %}
+                <div style="margin-top:.7rem;">
+                    {% for e in c.evidence %}
+                    <div class="ic-ev">
+                        <div>
+                            <code>{{ e.marker }}</code>
+                            {% if e.title %}· {{ e.title }}{% endif %}
+                            {% if e.page_num %}· 第 {{ e.page_num }} 页{% endif %}
+                        </div>
+                        <div><a href="{{ e.url }}" target="_blank" rel="noopener noreferrer"
+                                class="ic-snippet">{{ e.url }}</a></div>
+                        {% if e.snippet %}
+                        <div class="ic-snippet" style="margin-top:.3rem;">{{ e.snippet }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="ic-muted" style="margin-top:.4rem;">该论断暂无关联证据（待复核）</div>
+            {% endif %}
+        </div>
+    </details>
     {% endfor %}
+    </div>
+    <!-- 长列表渐进呈现：一次渲染数百条论断会拖慢首屏（UX: Virtualize Long Lists） -->
+    <div id="ic-more-wrap" style="text-align:center;margin:1.4rem 0 2rem 0;display:none;">
+        <button type="button" class="outline" id="ic-more-btn" style="width:auto;margin:0;">
+            显示更多论断（还有 <span id="ic-more-left">0</span> 条）
+        </button>
+    </div>
+    <p id="ic-ev-empty" class="ic-muted" style="display:none;margin:1.2rem 0;">
+        没有符合条件的论断，换个关键词或切回「全部」。
+    </p>
 {% else %}
     <article>
         <p class="ic-muted">
@@ -55,4 +145,89 @@
         </p>
     </article>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 证据台账：折叠 + 等级筛选 + 关键词搜索 + 渐进呈现。
+// 单个任务实测可达 415 条论断，一次性渲染会明显拖慢首屏，所以三者必须一起考虑：
+// 筛选/搜索改变「匹配集合」，渐进呈现只决定这个集合里先显示多少条。
+(function () {
+    const PAGE_SIZE = 50;
+    const all = Array.from(document.querySelectorAll('.ic-claim'));
+    if (!all.length) return;
+
+    const wrap = document.getElementById('ic-more-wrap');
+    const btn = document.getElementById('ic-more-btn');
+    const left = document.getElementById('ic-more-left');
+    const qInput = document.getElementById('ic-ev-q');
+    const countEl = document.getElementById('ic-ev-count');
+    const emptyEl = document.getElementById('ic-ev-empty');
+    const toggleBtn = document.getElementById('ic-ev-toggle');
+    const levelBtns = Array.from(document.querySelectorAll('.ic-level-btns button'));
+
+    let level = 'all';
+    let query = '';
+    let shown = PAGE_SIZE;
+
+    // 搜索用文本：论断正文 + 文献地址 + 摘要片段 + 标记 + 任务号。
+    // 预先算好缓存在 data 上，避免每次输入都重新拼几百条字符串。
+    all.forEach(el => { el.dataset.search = (el.textContent || '').toLowerCase().replace(/\s+/g, ' '); });
+
+    function matched() {
+        return all.filter(el => {
+            if (level !== 'all' && el.dataset.level !== level) return false;
+            if (query && !el.dataset.search.includes(query)) return false;
+            return true;
+        });
+    }
+
+    function apply() {
+        const hits = matched();
+        hits.forEach((el, i) => el.classList.toggle('ic-claim-hidden', i >= shown));
+        all.forEach(el => { if (!hits.includes(el)) el.classList.add('ic-claim-hidden'); });
+
+        const rest = hits.length - Math.min(shown, hits.length);
+        if (rest > 0) {
+            wrap.style.display = 'block';
+            left.textContent = String(rest);
+        } else {
+            wrap.style.display = 'none';
+        }
+        emptyEl.style.display = hits.length ? 'none' : 'block';
+        countEl.textContent = query || level !== 'all'
+            ? `匹配 ${hits.length} / ${all.length} 条`
+            : `共 ${all.length} 条`;
+    }
+
+    // 筛选/搜索变化时把渐进呈现重置回首屏，否则会出现「匹配 3 条却一条都不显示」
+    function reset() { shown = PAGE_SIZE; apply(); }
+
+    qInput.addEventListener('input', () => {
+        query = qInput.value.trim().toLowerCase();
+        reset();
+    });
+
+    levelBtns.forEach(b => b.addEventListener('click', () => {
+        level = b.dataset.level;
+        levelBtns.forEach(x => x.classList.toggle('active', x === b));
+        reset();
+    }));
+
+    btn.addEventListener('click', () => {
+        shown += PAGE_SIZE;
+        apply();
+        if (shown >= matched().length) icToast('已显示全部匹配论断');
+    });
+
+    // 全部展开 / 全部收起：只作用于当前可见（匹配）的条目，避免「展开」把过滤掉的也打开
+    toggleBtn.addEventListener('click', () => {
+        const open = toggleBtn.textContent === '全部展开';
+        matched().forEach(el => { el.open = open; });
+        toggleBtn.textContent = open ? '全部收起' : '全部展开';
+    });
+
+    apply();
+})();
+</script>
 {% endblock %}

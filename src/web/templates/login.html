@@ -1,58 +1,72 @@
 {% extends "base.html" %}
 {% block title %}登录 · InsightCrew{% endblock %}
 {% block content %}
-<div style="max-width:420px;margin:3rem auto;">
-    <h2>登录 InsightCrew</h2>
-    <p class="ic-muted">多 Agent 协作技术调研与选型平台</p>
+<div class="ic-auth-wrap">
+    <div class="ic-auth-card">
+        <div class="ic-auth-head">
+            <div class="ic-auth-logo">InsightCrew</div>
+            <p class="ic-muted" style="margin:.3rem 0 0 0;">多 Agent 协作技术调研与选型平台</p>
+        </div>
 
-    <article>
         <form id="ic-login-form" onsubmit="return false;">
             <label>用户名
-                <input type="text" id="username" name="username" autocomplete="username" required>
+                <input type="text" id="username" name="username" autocomplete="username"
+                       placeholder="请输入用户名" required>
             </label>
             <label>密码
-                <input type="password" id="password" name="password" autocomplete="current-password" required>
+                <input type="password" id="password" name="password" autocomplete="current-password"
+                       placeholder="请输入密码" required>
             </label>
-            <button type="submit" id="ic-login-btn">登录</button>
-            <button type="button" class="secondary outline" onclick="icDemoLogin()">Demo 账号一键登录</button>
+            <button type="submit" id="ic-login-btn" class="ic-cta" style="margin-top:.4rem;">登录</button>
+            <p class="ic-forgot-link"><a href="/forgot">忘记密码？</a></p>
         </form>
-        <p class="ic-muted" style="margin-top:.8rem;">
-            没有账号？<a href="#" onclick="icSwitchRegister();return false;">注册一个</a>
+
+        <p class="ic-muted" style="margin-top:1rem;text-align:center;">
+            没有账号？<a href="/register">注册一个</a>
         </p>
-        <div id="ic-msg" class="ic-muted"></div>
-    </article>
+        <div id="ic-msg" class="ic-msg"></div>
+    </div>
+    <p class="ic-auth-foot">
+        7 阶段流水线 · 3 道人工闸门 · 全链路引用可追溯
+    </p>
 </div>
+<style>
+    .ic-auth-wrap { max-width: 420px; margin: 5vh auto 0 auto; }
+    .ic-auth-card {
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: 16px; padding: 2rem 1.9rem 1.6rem 1.9rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .05), 0 20px 50px -20px rgba(15, 23, 42, .25);
+    }
+    .ic-auth-head { text-align: center; margin-bottom: 1.5rem; }
+    .ic-auth-logo {
+        display: inline-block; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+        background: linear-gradient(120deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .ic-auth-foot {
+        text-align: center; color: var(--ic-ink-3); font-size: .78rem; margin-top: 1.4rem;
+        letter-spacing: .01em;
+    }
+    .ic-forgot-link { text-align: right; margin: .5rem 0 0 0; font-size: .84rem; }
+    .ic-msg {
+        margin-top: .8rem; font-size: .85rem; text-align: center;
+        color: var(--ic-err); min-height: 1.2em;
+    }
+    .ic-msg:empty { min-height: 0; }
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    let icRegisterMode = false;
-
-    function icSwitchRegister() {
-        icRegisterMode = !icRegisterMode;
-        document.getElementById('ic-login-btn').textContent = icRegisterMode ? '注册' : '登录';
-        document.querySelector('#ic-login-form').closest('article')
-            .querySelector('p.ic-muted').innerHTML = icRegisterMode
-            ? '已有账号？<a href="#" onclick="icSwitchRegister();return false;">去登录</a>'
-            : '没有账号？<a href="#" onclick="icSwitchRegister();return false;">注册一个</a>';
-    }
-
-    function icDemoLogin() {
-        document.getElementById('username').value = 'demo';
-        document.getElementById('password').value = 'demo1234';
-        icSubmit();
-    }
-
     async function icSubmit() {
         const msg = document.getElementById('ic-msg');
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
         if (!username || !password) { msg.textContent = '请填写用户名与密码'; return; }
 
-        const url = icRegisterMode ? '/auth/register' : '/auth/login';
         msg.textContent = '处理中 ...';
         try {
-            const r = await fetch(url, {
+            const r = await fetch('/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -60,12 +74,6 @@
             const data = await r.json().catch(() => ({}));
             if (!r.ok) {
                 msg.textContent = data.detail || ('失败：HTTP ' + r.status);
-                return;
-            }
-            if (icRegisterMode) {
-                msg.textContent = '注册成功，正在登录 ...';
-                icRegisterMode = false;
-                await icSubmit();
                 return;
             }
             // 登录接口已下发 HttpOnly Cookie，直接跳转即可

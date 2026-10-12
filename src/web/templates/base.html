@@ -4,82 +4,445 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}InsightCrew{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pico.css@2/css/pico.min.css">
+    <link rel="preconnect" href="https://fonts.loli.net">
+    <link rel="preconnect" href="https://gstatic.loli.net" crossorigin>
+    <!-- display=swap：字体加载期间先用系统字体渲染，避免文字不可见（UX: Font Loading）
+         ⚠ CDN 选型：Google Fonts 与 jsdelivr 在国内不可达（实测 10054 重置），
+         改用国内镜像 fonts.loli.net / gstatic.loli.net。 -->
+    <link rel="stylesheet"
+          href="https://fonts.loli.net/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap">
+    <!-- Pico CSS 本地托管：原 jsdelivr CDN 在国内被墙导致整页退回浏览器默认样式
+         （这是「页面很粗糙」的根因）。字体加载失败只影响字体，Pico 失败影响全部
+         基础样式，所以 Pico 必须本地化，字体走镜像 + 系统字体兜底即可。 -->
+    <link rel="stylesheet" href="/static/css/pico.min.css">
     <style>
-        :root { --ic-accent: #2b6cb0; --ic-ok: #2f855a; --ic-warn: #b7791f; --ic-err: #c53030; }
-        nav.ic-nav { border-bottom: 1px solid var(--pico-muted-border-color); margin-bottom: 1.5rem; }
-        nav.ic-nav ul { align-items: center; }
-        .ic-brand { font-weight: 700; font-size: 1.15rem; color: var(--ic-accent); }
-        .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
-                 font-size: .78rem; font-weight: 600; line-height: 1.5; white-space: nowrap; }
-        .badge-pending { background: #edf2f7; color: #4a5568; }
-        .badge-running { background: #ebf8ff; color: var(--ic-accent); }
-        .badge-done    { background: #f0fff4; color: var(--ic-ok); }
-        .badge-failed  { background: #fff5f5; color: var(--ic-err); }
-        .badge-aborted { background: #faf5ff; color: #6b46c1; }
-        .badge-gate    { background: #fffaf0; color: var(--ic-warn); }
-        .ic-muted { color: var(--pico-muted-color); font-size: .88rem; }
+        /* ═══════════ 设计令牌 ═══════════ */
+        /* 取值依据 ui-ux-pro-max design_recommend：SaaS 技术调研平台
+           → 信任蓝主色 + 琥珀强调色（对比度已调至 WCAG 3:1），Fira 字体族 */
+        :root {
+            --ic-font: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                       "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+                       "Noto Sans SC", sans-serif;
+            --ic-mono: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono",
+                       Menlo, monospace;
+            --ic-accent: #1e40af;          /* 主色 · 信任蓝 */
+            --ic-accent-2: #3b82f6;        /* 次色 */
+            --ic-accent-dark: #1e3a8a;
+            --ic-accent-soft: #eff6ff;
+            --ic-accent-line: #bfdbfe;
+            --ic-cta: #d97706;             /* 强调色 · 琥珀（CTA / 待办） */
+            --ic-cta-dark: #b45309;
+            --ic-cta-soft: #fffbeb;
+            --ic-ok: #059669;
+            --ic-ok-soft: #ecfdf5;
+            --ic-warn: #d97706;
+            --ic-warn-soft: #fffbeb;
+            --ic-err: #dc2626;
+            --ic-err-soft: #fef2f2;
+            --ic-ink: #0f172a;
+            --ic-ink-2: #475569;
+            --ic-ink-3: #94a3b8;
+            --ic-line: #e2e8f0;
+            --ic-line-soft: #f1f5f9;
+            --ic-bg: #f8fafc;
+            --ic-surface: #ffffff;
+            --ic-radius: 12px;
+            --ic-radius-sm: 8px;
+            --ic-shadow-sm: 0 1px 2px rgba(15, 23, 42, .05);
+            --ic-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 8px 24px -10px rgba(15, 23, 42, .14);
+            /* 间距刻度（4/8 节奏，来自 Skill 间距建议） */
+            --space-xs: 4px;  --space-sm: 8px;  --space-md: 16px;
+            --space-lg: 24px; --space-xl: 32px; --space-2xl: 48px;
+            /* 图标尺寸令牌：禁止任意值 */
+            --icon-sm: 14px; --icon-md: 18px; --icon-lg: 24px;
+        }
+        /* 覆写 Pico 主题变量，一处换肤 */
+        :root {
+            --pico-font-family: var(--ic-font);
+            --pico-font-size: 100%;
+            --pico-line-height: 1.65;
+            --pico-primary: var(--ic-accent);
+            --pico-primary-background: var(--ic-accent);
+            --pico-primary-border: var(--ic-accent);
+            --pico-primary-hover: var(--ic-accent-dark);
+            --pico-primary-hover-background: var(--ic-accent-dark);
+            --pico-primary-hover-border: var(--ic-accent-dark);
+            --pico-primary-focus: rgba(30, 64, 175, .22);
+            --pico-primary-underline: rgba(30, 64, 175, .5);
+            --pico-primary-inverse: #fff;
+            --pico-border-radius: 10px;
+            --pico-muted-color: var(--ic-ink-2);
+            --pico-muted-border-color: var(--ic-line);
+            --pico-background-color: var(--ic-bg);
+            --pico-color: var(--ic-ink);
+            --pico-h1-color: var(--ic-ink);
+            --pico-h2-color: var(--ic-ink);
+            --pico-h3-color: var(--ic-ink);
+            --pico-form-element-border-color: var(--ic-line);
+            --pico-form-element-active-border-color: var(--ic-accent);
+            --pico-form-element-focus-color: rgba(30, 64, 175, .14);
+            --pico-form-element-background-color: #fff;
+            --pico-card-background-color: var(--ic-surface);
+            --pico-card-border-color: var(--ic-line);
+            --pico-card-sectioning-background-color: var(--ic-line-soft);
+            --pico-code-background-color: var(--ic-line-soft);
+            --pico-code-color: #be185d;
+        }
+        body {
+            /* ★ 页脚吸底：内容不满一屏时把 footer 压到底部，否则页脚会停在
+               半空、下方留一大片空白。做法是让 body 成为整屏高的竖向 flex，
+               由 main 吃掉剩余空间（flex:1），nav / footer 各自保持自然高度。
+               Pico 没有给 body 设高度，所以必须自己声明 min-height。 */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            background:
+                radial-gradient(1100px 480px at 12% -8%, #eff6ff 0%, transparent 62%),
+                radial-gradient(900px 420px at 92% 0%, #f0f9ff 0%, transparent 55%),
+                var(--ic-bg);
+            background-attachment: fixed;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+        }
+        /* 撑开剩余空间，把页脚推到视口底部；内容超一屏时自然随内容增高 */
+        main.container {
+            flex: 1 0 auto;
+            max-width: 1180px; padding-top: 1.25rem; padding-bottom: 4rem;
+        }
+        h2 { letter-spacing: -.015em; }
+        h3, h4 { letter-spacing: -.01em; }
+        a { text-underline-offset: 3px; }
+
+        /* ═══════════ 导航 ═══════════ */
+        nav.ic-nav {
+            position: sticky; top: 0; z-index: 40;
+            background: rgba(255, 255, 255, .86);
+            backdrop-filter: saturate(180%) blur(12px);
+            -webkit-backdrop-filter: saturate(180%) blur(12px);
+            border-bottom: 1px solid var(--ic-line);
+            margin-bottom: 1.75rem;
+            padding: .85rem 0;
+        }
+        /* Pico 的 nav 默认 flex-wrap: wrap，右侧那组在窄屏/长用户名时会掉到
+           第二行（用户 m25143 第 3 项）。这里强制单行 + 两端对齐，并让右侧
+           组 margin-left:auto 兜住「左侧内容很短时右侧仍贴右」。 */
+        nav.ic-nav > .container {
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: nowrap; gap: 1rem;
+        }
+        nav.ic-nav ul { align-items: center; margin: 0; flex-wrap: nowrap; }
+        nav.ic-nav ul:last-child { margin-left: auto; }
+        nav.ic-nav li { padding: 0; }
+        nav.ic-nav li + li { margin-left: .35rem; }
+        .ic-brand {
+            display: inline-flex; align-items: center; gap: .62rem;
+            font-weight: 700; font-size: 1.42rem; letter-spacing: -.028em;
+            color: var(--ic-ink); text-decoration: none; line-height: 1.2;
+        }
+        .ic-brand:hover { color: var(--ic-accent); }
+        .ic-brand::before {
+            content: ""; width: 1.72rem; height: 1.72rem; border-radius: 9px; flex: none;
+            background: linear-gradient(135deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+            box-shadow: 0 2px 8px -2px rgba(79, 70, 229, .55);
+        }
+        /* 左侧「API 文档」入口（用户 m26104：从右侧挪到品牌名旁边并改中文） */
+        .ic-nav-sub {
+            color: var(--ic-ink-2); font-size: .86rem; padding-left: .7rem;
+            border-left: 1px solid var(--ic-line); text-decoration: none;
+        }
+        .ic-nav-sub:hover { color: var(--ic-accent); }
+        /* 顶栏右侧的登录状态：用户名胶囊，避免裸文字在深色/浅色下忽明忽暗。
+           用户 m26104 起它是链接（点进个人信息页），故去掉下划线。 */
+        .ic-nav-user {
+            display: inline-flex; align-items: center; gap: .4rem;
+            padding: .3rem .72rem; border-radius: 999px;
+            background: var(--ic-accent-soft); border: 1px solid var(--ic-accent-line);
+            color: var(--ic-accent-dark); font-size: .84rem; font-weight: 600;
+            max-width: 13rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            text-decoration: none;
+        }
+        .ic-nav-user:hover { background: var(--ic-accent-line); color: var(--ic-accent-dark); }
+        /* 退出按钮：与用户名之间留出间距，避免两个胶囊贴在一起像同一个控件 */
+        .ic-nav-btn {
+            width: auto; margin: 0 0 0 .35rem; padding: .3rem .85rem;
+            font-size: .84rem; white-space: nowrap;
+        }
+        @media (max-width: 640px) {
+            .ic-nav-sub { display: none; }
+            .ic-brand { font-size: 1.2rem; }
+            .ic-nav-user { max-width: 7rem; }
+            .ic-nav-btn { padding: .3rem .6rem; }
+        }
+
+        /* ═══════════ 徽标 ═══════════ */
+        .badge {
+            display: inline-block; padding: .14rem .58rem; border-radius: 999px;
+            font-size: .76rem; font-weight: 600; line-height: 1.55; white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .badge-pending { background: var(--ic-line-soft); color: var(--ic-ink-2); border-color: var(--ic-line); }
+        .badge-running { background: var(--ic-accent-soft); color: var(--ic-accent-dark); border-color: var(--ic-accent-line); }
+        .badge-done    { background: var(--ic-ok-soft); color: var(--ic-ok); border-color: #a7f3d0; }
+        .badge-failed  { background: var(--ic-err-soft); color: var(--ic-err); border-color: #fecaca; }
+        .badge-aborted { background: #faf5ff; color: #7c3aed; border-color: #e9d5ff; }
+        .badge-gate    { background: var(--ic-warn-soft); color: var(--ic-warn); border-color: #fde68a; }
+
+        /* ═══════════ 通用 ═══════════ */
+        .ic-muted { color: var(--ic-ink-2); font-size: .88rem; }
         .ic-cost { font-variant-numeric: tabular-nums; font-weight: 600; }
-        .ic-card { border: 1px solid var(--pico-muted-border-color); border-radius: 8px;
-                   padding: 1rem 1.1rem; margin-bottom: .9rem; }
+        .ic-card {
+            background: var(--ic-surface);
+            border: 1px solid var(--ic-line);
+            border-radius: var(--ic-radius);
+            padding: 1.05rem 1.15rem;
+            margin-bottom: .9rem;
+            box-shadow: var(--ic-shadow-sm);
+            transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease;
+        }
+        .ic-card-hover:hover {
+            box-shadow: var(--ic-shadow);
+            border-color: var(--ic-accent-line);
+            transform: translateY(-1px);
+        }
+        .ic-card h4 { margin: 0 0 .5rem 0; }
+
+        /* ═══════════ 时间线 ═══════════ */
         .ic-timeline { max-height: 62vh; overflow-y: auto; padding-right: .4rem; }
-        .ic-ev { border-left: 3px solid var(--pico-muted-border-color); padding: .35rem .7rem;
-                 margin-bottom: .5rem; font-size: .88rem; background: #fafafa; border-radius: 0 6px 6px 0; }
-        .ic-ev.gate { border-left-color: var(--ic-warn); background: #fffaf0; }
+        .ic-ev {
+            border-left: 3px solid var(--ic-line); padding: .4rem .75rem;
+            margin-bottom: .5rem; font-size: .875rem;
+            background: var(--ic-surface); border-radius: 0 var(--ic-radius-sm) var(--ic-radius-sm) 0;
+            box-shadow: var(--ic-shadow-sm);
+        }
+        .ic-ev.gate { border-left-color: var(--ic-warn); background: var(--ic-warn-soft); }
         .ic-ev.done { border-left-color: var(--ic-ok); }
-        .ic-ev.err  { border-left-color: var(--ic-err); background: #fff5f5; }
+        .ic-ev.err  { border-left-color: var(--ic-err); background: var(--ic-err-soft); }
         .ic-ev .t { font-weight: 600; }
-        .ic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
-        @media (max-width: 900px) { .ic-grid { grid-template-columns: 1fr; } }
-        pre.ic-md { white-space: pre-wrap; word-wrap: break-word; font-size: .87rem;
-                    background: #fafafa; padding: .9rem; border-radius: 6px; }
+
+        /* ★ 两列栅格必须用 minmax(0,1fr) 而不是 1fr（用户 m26742 第 3 项）。
+           `1fr` 的隐含下限是 `auto`，而 grid 项目的默认 `min-width: auto`
+           同样等于「不得小于内容的 min-content 宽度」。右侧中间产物里的宽
+           表格 / 长代码块一旦 min-content 超过半栏，整条轨道就被撑开，
+           格子直接顶到容器右边界之外 —— 看起来就是「没受父容器页边距控制」。
+           minmax(0,1fr) + 子项 min-width:0 把下限归零，超宽内容改由子元素
+           自己滚动，容器宽度就守住了。 */
+        .ic-grid {
+            display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 1.2rem;
+        }
+        .ic-grid > * { min-width: 0; }
+        @media (max-width: 900px) { .ic-grid { grid-template-columns: minmax(0, 1fr); } }
+
+        pre.ic-md {
+            white-space: pre-wrap; word-wrap: break-word; font-size: .865rem;
+            font-family: var(--ic-mono); line-height: 1.6;
+            background: var(--ic-line-soft); padding: .95rem; border-radius: var(--ic-radius-sm);
+            border: 1px solid var(--ic-line);
+        }
         /* 闸门等待时可编辑的中间产物（用户 m18267） */
-        pre.ic-md.ic-editable { background: #fff; border: 1px dashed var(--ic-warn);
-                                cursor: text; }
+        pre.ic-md.ic-editable {
+            background: #fff; border: 1px dashed var(--ic-warn); cursor: text;
+        }
         pre.ic-md.ic-editable:focus { outline: 2px solid var(--ic-warn); outline-offset: 1px; }
-        .ic-gatebar { border: 1px solid var(--ic-warn); background: #fffaf0;
-                      border-radius: 8px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
-        .ic-gatebar h4 { margin: 0 0 .5rem 0; color: var(--ic-warn); }
+
+        /* ═══════════ 闸门条 ═══════════ */
+        .ic-gatebar {
+            border: 1px solid #fde68a; background: linear-gradient(180deg, #fffdf5 0%, var(--ic-warn-soft) 100%);
+            border-radius: var(--ic-radius); padding: .95rem 1.15rem; margin-bottom: 1rem;
+            box-shadow: var(--ic-shadow-sm);
+        }
+        .ic-gatebar h4 { margin: 0 0 .5rem 0; color: #b45309; }
         .ic-gatebar .actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
         .ic-gatebar button, .ic-gatebar a[role=button] { margin: 0; width: auto; }
-        .ic-toast { position: fixed; right: 1rem; bottom: 1rem; z-index: 50;
-                    background: #2d3748; color: #fff; padding: .6rem 1rem; border-radius: 6px;
-                    font-size: .88rem; opacity: 0; transition: opacity .25s; pointer-events: none; }
-        .ic-toast.show { opacity: .95; }
-        .ic-snippet { font-size: .8rem; color: #4a5568; }
-        .ic-bar { height: 8px; background: #edf2f7; border-radius: 999px; overflow: hidden; }
-        .ic-bar > span { display: block; height: 100%; background: var(--ic-accent); }
-        /* 报告正文 */
-        .ic-report { font-size: .95rem; line-height: 1.75; }
-        .ic-report h1, .ic-report h2, .ic-report h3 { margin-top: 1.4rem; }
+
+        /* ═══════════ 提示条 ═══════════ */
+        .ic-toast {
+            position: fixed; right: 1rem; bottom: 1rem; z-index: 90;
+            background: #1e293b; color: #fff; padding: .65rem 1.05rem; border-radius: 10px;
+            font-size: .875rem; opacity: 0; transition: opacity .25s, transform .25s;
+            transform: translateY(6px); pointer-events: none;
+            box-shadow: 0 10px 30px -8px rgba(15, 23, 42, .45);
+        }
+        .ic-toast.show { opacity: .97; transform: translateY(0); }
+
+        .ic-snippet { font-size: .8rem; color: var(--ic-ink-2); word-break: break-all; }
+        .ic-bar { height: 8px; background: var(--ic-line); border-radius: 999px; overflow: hidden; }
+        .ic-bar > span {
+            display: block; height: 100%; border-radius: 999px;
+            background: linear-gradient(90deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+            transition: width .4s ease;
+        }
+
+        /* ═══════════ 报告正文 ═══════════ */
+        .ic-report { font-size: .95rem; line-height: 1.8; }
+        .ic-report h1 { font-size: 1.6rem; }
+        .ic-report h1, .ic-report h2, .ic-report h3 { margin-top: 1.6rem; }
+        .ic-report h2 {
+            padding-bottom: .35rem; border-bottom: 1px solid var(--ic-line);
+        }
         .ic-report table { width: 100%; font-size: .87rem; }
-        .ic-report pre { background: #fafafa; padding: .9rem; border-radius: 6px; overflow-x: auto; }
-        .ic-report code { font-size: .86em; }
-        /* 引用角标 */
-        button.ic-cite { display: inline; width: auto; margin: 0 .1rem; padding: 0 .3rem;
-                         font-size: .74rem; line-height: 1.4; border-radius: 4px;
-                         background: #ebf8ff; color: var(--ic-accent);
-                         border: 1px solid #bee3f8; vertical-align: baseline; }
-        button.ic-cite:hover { background: #bee3f8; }
-        button.ic-cite-missing { background: #fff5f5; color: var(--ic-err); border-color: #fed7d7; }
-        /* 证据抽屉 */
-        .ic-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 92vw);
-                     background: #fff; border-left: 1px solid var(--pico-muted-border-color);
-                     box-shadow: -4px 0 18px rgba(0,0,0,.08); z-index: 60;
-                     transform: translateX(102%); transition: transform .22s ease;
-                     display: flex; flex-direction: column; }
+        .ic-report pre {
+            background: var(--ic-line-soft); padding: .95rem;
+            border: 1px solid var(--ic-line); border-radius: var(--ic-radius-sm);
+            overflow-x: auto;
+        }
+        .ic-report code { font-size: .86em; font-family: var(--ic-mono); }
+        .ic-report blockquote {
+            border-left: 3px solid var(--ic-accent-line); padding-left: .9rem;
+            color: var(--ic-ink-2);
+        }
+
+        /* ═══════════ 引用角标 ═══════════ */
+        button.ic-cite {
+            display: inline; width: auto; margin: 0 .12rem; padding: 0 .32rem;
+            font-size: .73rem; line-height: 1.45; border-radius: 5px;
+            background: var(--ic-accent-soft); color: var(--ic-accent-dark);
+            border: 1px solid var(--ic-accent-line); vertical-align: baseline;
+            font-family: var(--ic-mono);
+        }
+        button.ic-cite:hover { background: var(--ic-accent-line); }
+        button.ic-cite-missing { background: var(--ic-err-soft); color: var(--ic-err); border-color: #fecaca; }
+
+        /* ═══════════ 抽屉 ═══════════ */
+        .ic-drawer {
+            position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 92vw);
+            background: #fff; border-left: 1px solid var(--ic-line);
+            box-shadow: -8px 0 32px rgba(15, 23, 42, .12); z-index: 70;
+            transform: translateX(102%); transition: transform .24s cubic-bezier(.4, 0, .2, 1);
+            display: flex; flex-direction: column;
+        }
         .ic-drawer.open { transform: translateX(0); }
-        .ic-drawer-head { display: flex; justify-content: space-between; align-items: center;
-                          padding: .8rem 1rem; border-bottom: 1px solid var(--pico-muted-border-color); }
+        .ic-drawer-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: .85rem 1rem; border-bottom: 1px solid var(--ic-line);
+            background: var(--ic-line-soft);
+        }
         #ic-drawer-body { padding: 1rem; overflow-y: auto; }
-        .ic-drawer-mask { position: fixed; inset: 0; background: rgba(0,0,0,.25);
-                          opacity: 0; pointer-events: none; transition: opacity .22s; z-index: 55; }
+        .ic-drawer-mask {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, .32);
+            opacity: 0; pointer-events: none; transition: opacity .24s; z-index: 65;
+            backdrop-filter: blur(1px);
+        }
         .ic-drawer-mask.open { opacity: 1; pointer-events: auto; }
+
+        /* 居中模态框（未填邮箱提醒）。与抽屉共用遮罩配色，但内容是居中的卡片 */
+        .ic-modal-mask {
+            position: fixed; inset: 0; z-index: 70;
+            background: rgba(15, 23, 42, .42); backdrop-filter: blur(2px);
+            display: flex; align-items: center; justify-content: center; padding: 1.2rem;
+        }
+        .ic-modal-mask[hidden] { display: none; }
+        .ic-modal {
+            background: var(--ic-surface); border: 1px solid var(--ic-line);
+            border-radius: var(--ic-radius); padding: 1.5rem 1.6rem 1.3rem 1.6rem;
+            max-width: 26rem; width: 100%;
+            box-shadow: 0 24px 60px -24px rgba(15, 23, 42, .4);
+        }
+        .ic-modal-title { margin: 0 0 .55rem 0; font-size: 1.08rem; }
+        .ic-modal-body { color: var(--ic-ink-2); font-size: .88rem; line-height: 1.65; margin: 0 0 1.2rem 0; }
+        .ic-modal-actions { display: flex; justify-content: flex-end; gap: .6rem; flex-wrap: wrap; }
+        .ic-modal-actions button { width: auto; margin: 0; }
+        .ic-modal-cta { text-decoration: none; display: inline-flex; align-items: center; }
+
+        /* 成功弹窗：绿色对勾 + 标题一行，视觉上要一眼看出「成了」 */
+        .ic-ok-modal { max-width: 24rem; }
+        .ic-ok-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; }
+        .ic-ok-head .ic-modal-title { margin: 0; }
+        .ic-ok-badge {
+            flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--ic-ok-soft); color: var(--ic-ok);
+        }
+        .ic-ok-badge svg { width: 1.1rem; height: 1.1rem; }
+
         /* 新建任务：模型分配行（左角色说明 + 右下拉） */
-        .ic-role-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-                       padding: .55rem 1rem; border-bottom: 1px solid #f0f0f0; }
+        .ic-role-row {
+            display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+            padding: .6rem 1rem; border-bottom: 1px solid var(--ic-line-soft);
+        }
         .ic-role-row:last-child { border-bottom: none; }
+        .ic-role-row:hover { background: #fafbff; }
         .ic-role-row > select { flex: 1; min-width: 220px; margin: 0; }
+
+        /* ═══════════ 页脚 ═══════════ */
+        footer.ic-footer {
+            border-top: 1px solid var(--ic-line); margin-top: 3rem;
+            padding: 1.2rem 0 2rem 0; color: var(--ic-ink-3); font-size: .8rem;
+        }
+
+        /* ═══════════ 图标（SVG 矢量，禁止 emoji 作结构图标）═══════════ */
+        .ic-icon {
+            width: var(--icon-md); height: var(--icon-md);
+            flex: 0 0 auto; vertical-align: -.18em;
+            stroke-width: 1.75; stroke: currentColor; fill: none;
+            stroke-linecap: round; stroke-linejoin: round;
+        }
+        .ic-icon-sm { width: var(--icon-sm); height: var(--icon-sm); }
+        .ic-icon-lg { width: var(--icon-lg); height: var(--icon-lg); }
+        .ic-icon-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; padding: 0; margin: 0;
+            border-radius: 7px; border: 1px solid var(--ic-line);
+            background: #fff; color: var(--ic-ink-2); cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease;
+        }
+        .ic-icon-btn:hover { background: var(--ic-line-soft); color: var(--ic-ink); border-color: var(--ic-ink-3); }
+
+        /* ═══════════ 主行动按钮（强调色 · 琥珀）═══════════ */
+        button.ic-cta, a.ic-cta[role=button] {
+            --pico-background-color: var(--ic-cta);
+            --pico-border-color: var(--ic-cta);
+            background: var(--ic-cta); border-color: var(--ic-cta); color: #fff;
+            font-weight: 600;
+        }
+        button.ic-cta:hover, a.ic-cta[role=button]:hover {
+            background: var(--ic-cta-dark); border-color: var(--ic-cta-dark); color: #fff;
+        }
+        /* 主行动按钮在页头/表单里通常需要内联宽度 */
+        button.ic-cta { width: auto; margin: 0; }
+
+        /* ═══════════ 焦点可见（键盘导航）═══════════ */
+        a:focus-visible, button:focus-visible, [role=button]:focus-visible,
+        input:focus-visible, select:focus-visible, summary:focus-visible {
+            outline: 2px solid var(--ic-accent);
+            outline-offset: 2px;
+            border-radius: var(--ic-radius-sm);
+        }
+        /* 尊重系统「减少动态效果」偏好 */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: .01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+
+        /* 打印：只留报告正文与参考文献，去掉导航/工具栏/抽屉等交互外壳 */
+        @media print {
+            @page { margin: 16mm 14mm; }
+            nav.ic-nav, .ic-toolbar, .ic-drawer, .ic-drawer-mask,
+            .ic-noprint, .ic-toast, footer { display: none !important; }
+            body { background: #fff; }
+            .container { max-width: none; width: 100%; padding: 0; margin: 0; }
+            main.container { padding: 0; }
+            .ic-report { font-size: 10.5pt; line-height: 1.6; }
+            .ic-report h1, .ic-report h2, .ic-report h3 { break-after: avoid; page-break-after: avoid; }
+            .ic-report h2 { break-before: auto; }
+            .ic-report table { break-inside: auto; font-size: 9pt; }
+            .ic-report tr { break-inside: avoid; page-break-inside: avoid; }
+            .ic-report thead { display: table-header-group; }
+            .ic-report pre { background: #f7f7f7 !important; border: 1px solid #e2e2e2;
+                             white-space: pre-wrap; word-break: break-word; }
+            .ic-report a { color: inherit; text-decoration: none; }
+            /* 引用角标打印成朴素上标样式，不留按钮外观 */
+            button.ic-cite { background: none !important; border: none !important;
+                             color: inherit !important; padding: 0 !important;
+                             font-size: .78em !important; vertical-align: super; }
+            details.ic-card { border: none; padding: 0; break-before: page; page-break-before: always; }
+            details.ic-card > summary { display: none; }
+            details.ic-card > pre { border: none; padding: 0; background: none !important; }
+        }
     </style>
 </head>
 <body>
@@ -87,14 +450,18 @@
     <div class="container">
         <ul>
             <li><a href="/tasks" class="ic-brand">InsightCrew</a></li>
-            <li><span class="ic-muted">多 Agent 协作技术调研</span></li>
+            <li style="padding-left: 10px;padding-bottom: 5px;"><a href="/docs" class="ic-nav-sub">API 文档</a></li>
         </ul>
         <ul>
             {% if user %}
-                <li><span class="ic-muted">{{ user.username }}</span></li>
-                <li><a href="/docs" class="ic-muted">API</a></li>
-                <li><button class="outline secondary" style="width:auto;margin:0;padding:.3rem .8rem;"
-                            onclick="icLogout()">退出</button></li>
+                <li style="padding-right: 10px; padding-top: 3px;">
+                    <a href="/profile" class="ic-nav-user" title="个人信息：{{ user.username }}">
+                    <svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="8" r="3.4"/>
+                        <path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>
+                    </svg>{{ user.username }}</a></li>
+                <li><button class="outline secondary ic-nav-btn"
+                            onclick="icLogout()">退出登录</button></li>
             {% endif %}
         </ul>
     </div>
@@ -102,15 +469,163 @@
 <main class="container">
     {% block content %}{% endblock %}
 </main>
+<footer class="ic-footer">
+    <div class="container">
+        InsightCrew · 多 Agent 协作技术调研与选型平台
+    </div>
+</footer>
 <div id="ic-toast" class="ic-toast"></div>
+
+{# 统一「操作成功」弹窗（用户 m26742 第 2 项）─────────────────────────────
+   改密、换邮箱这类提交是「一次性的状态变更」，提交完页面上的其它内容
+   （顶栏邮箱、已验证徽标、改密表单是否可用）全都过期了，必须刷新才一致。
+   用 toast 提示不够 —— 它 2.2 秒就消失，用户可能刚好没看到；而且 toast 是
+   被动消失的，没有任何「接着要发生什么」的交代。这里用居中弹窗把成功
+   信息摆到用户眼前，倒计时结束后自动刷新。
+
+   ★ 为什么不做成「点确定才刷新」：多一次点击，且用户不点就停在过期页面。
+     「2 秒后自动刷新」是用户明确要求的行为，倒计时文案让刷新可预期，
+     想立刻刷新的话按钮就在那儿。 #}
+<div class="ic-modal-mask" id="ic-ok-mask" hidden>
+    <div class="ic-modal ic-ok-modal" role="dialog" aria-modal="true"
+         aria-labelledby="ic-ok-title">
+        <div class="ic-ok-head">
+            <span class="ic-ok-badge" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 13l4 4L19 7"/>
+                </svg>
+            </span>
+            <h3 id="ic-ok-title" class="ic-modal-title">操作成功</h3>
+        </div>
+        <p class="ic-modal-body" id="ic-ok-body"></p>
+        <div class="ic-modal-actions">
+            <button type="button" id="ic-ok-btn" class="ic-cta">立即刷新</button>
+        </div>
+    </div>
+</div>
+
+{# 未填邮箱提醒（用户 m26104）────────────────────────────────────────────
+   邮箱在注册时是可选的，但没邮箱就收不到重置邮件 —— 忘记密码时只能找管理员。
+   所以对这类用户每次登录后提醒一次，引导去个人信息页补填。
+
+   用 sessionStorage 记「本次会话已提醒」：关掉后不再弹，但**下次登录会再弹**
+   （用户要求「每次登录都提醒，但可关闭」）。用 sessionStorage 而不是
+   localStorage，是因为「每次登录」的边界就是浏览器会话 —— 后者关一次就
+   永久不提醒了，等于把要求实现成了「只提醒一次」。 #}
+{% if user and not user.db_email %}
+<div class="ic-modal-mask" id="ic-mail-mask" hidden>
+    <div class="ic-modal" role="dialog" aria-modal="true" aria-labelledby="ic-mail-title">
+        <h3 id="ic-mail-title" class="ic-modal-title">补填邮箱，避免账号找不回</h3>
+        <p class="ic-modal-body">
+            你的账号还没有绑定邮箱。忘记密码时的重置链接会发到邮箱，
+            没有邮箱就只能联系管理员处理。
+        </p>
+        <div class="ic-modal-actions">
+            <button class="outline secondary" onclick="icDismissMailTip()">稍后再说</button>
+            {# ★ 这里必须同时消解弹窗：目标页 /profile 同样满足「未绑定邮箱」条件，
+               也会渲染本弹窗。若只导航不记「已提醒」，用户点完按钮跳到个人信息页，
+               看到的还是同一个弹窗 —— 从用户视角就是「点了按钮弹窗不关」。
+               sessionStorage 是页签级、跨导航存活，所以先标记再让默认跳转继续。 #}
+            <a href="/profile" class="ic-cta ic-modal-cta" onclick="icDismissMailTip()">去补填邮箱</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
+    /* ── 全局 401 拦截 ────────────────────────────────────────────────
+       改密后 `users.token_version` 会 +1，所有已发出的旧 token 立刻作废。
+       页面本身是服务端渲染的，但站内大量交互走 fetch（状态轮询、闸门操作、
+       删除任务 ...），那些请求会各自收到 401。与其在十几个调用点各写一遍
+       判断，不如在这里包一层 fetch：任何接口回 401 都统一提示 + 回登录页。
+       一处改动覆盖全站，也避免「页面看着还在，一点就报错」的困惑。
+
+       例外：`/auth/` 下的接口本身就用 401 表达业务失败（密码错误），
+       不能当成会话失效 —— 否则登录页输错密码会被弹「登录已失效」。
+    */
+    (function () {
+        const _fetch = window.fetch.bind(window);
+        let redirecting = false;
+        window.fetch = async function (input, init) {
+            const r = await _fetch(input, init);
+            if (r.status === 401 && !redirecting) {
+                const url = (typeof input === 'string') ? input : (input && input.url) || '';
+                if (!url.startsWith('/auth/')) {
+                    redirecting = true;
+                    icToast('登录已失效，请重新登录');
+                    setTimeout(() => { location.href = '/login'; }, 900);
+                }
+            }
+            return r;
+        };
+    })();
+
     function icToast(msg) {
         const el = document.getElementById('ic-toast');
         el.textContent = msg;
         el.classList.add('show');
         setTimeout(() => el.classList.remove('show'), 2200);
     }
+
+    /* 统一「操作成功」弹窗（用户 m26742 第 2 项）：弹窗提示 + 2 秒后自动刷新。
+        opts.reload === false 时不刷新（只提示）；
+       opts.redirect = '/x' 时改为跳转该地址（用于「改完密码去登录」这类
+         场景 —— 那种情况下刷新原页面会回到一个令牌已作废的页面）；
+       opts.delay 可改延迟毫秒数。
+       兜底：万一模板里没有这个弹窗（比如极简页面），退回 toast + 延迟动作，
+       功能不丢。 */
+    function icSuccess(msg, opts) {
+        const o = opts || {};
+        const dest = o.redirect || '';
+        const reload = !dest && o.reload !== false;
+        const delay = o.delay == null ? 2000 : o.delay;
+        const mask = document.getElementById('ic-ok-mask');
+        const go = () => { if (dest) { location.href = dest; } else if (reload) { location.reload(); } };
+        if (!mask) {
+            icToast(msg);
+            if (dest || reload) setTimeout(go, delay);
+            return;
+        }
+        const body = document.getElementById('ic-ok-body');
+        const btn = document.getElementById('ic-ok-btn');
+        btn.onclick = () => { if (dest || reload) { go(); } else { mask.hidden = true; } };
+        mask.hidden = false;
+        if (!dest && !reload) {
+            btn.textContent = '知道了';
+            body.textContent = msg;
+            return;
+        }
+        const tail = dest ? '秒后自动跳转' : '秒后自动刷新';
+        btn.textContent = dest ? '立即前往' : '立即刷新';
+        let left = Math.ceil(delay / 1000);
+        const paint = () => {
+            body.textContent = msg + '　' + (left > 0 ? left + ' ' + tail : '正在跳转 …');
+        };
+        paint();
+        const timer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) { clearInterval(timer); paint(); go(); return; }
+            paint();
+        }, 1000);
+    }
+
+    /* 未填邮箱提醒：非 alert 的页面内弹窗（用户 m26104 明确要求不要 alert） */
+    function icDismissMailTip() {
+        const m = document.getElementById('ic-mail-mask');
+        if (m) m.hidden = true;
+        try { sessionStorage.setItem('icMailTipDismissed', '1'); } catch (e) {}
+    }
+    (function () {
+        const m = document.getElementById('ic-mail-mask');
+        if (!m) return;
+        let dismissed = false;
+        try { dismissed = sessionStorage.getItem('icMailTipDismissed') === '1'; } catch (e) {}
+        if (!dismissed) m.hidden = false;
+    })();
+
     async function icLogout() {
+        try { sessionStorage.removeItem('icMailTipDismissed'); } catch (e) {}
         await fetch('/auth/logout', { method: 'POST' });
         location.href = '/login';
     }
@@ -125,6 +640,30 @@
     function icStatusBadge(s) {
         const [cls, label] = IC_STATUS[s] || ['badge-pending', s || '未知'];
         return `<span class="badge ${cls}">${label}</span>`;
+    }
+    // 统一 SVG 图标集（Phosphor 风格线性图标；替代 emoji，见 UX 规范「禁止 emoji 作结构图标」）
+    const IC_ICONS = {
+        lock:    '<path d="M6 11V8a6 6 0 0 1 12 0v3"/><rect x="4" y="11" width="16" height="10" rx="2"/>',
+        pause:   '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+        close:   '<path d="M6 6l12 12M18 6L6 18"/>',
+        plus:    '<path d="M12 5v14M5 12h14"/>',
+        check:   '<path d="M5 13l4 4L19 7"/>',
+        undo:    '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+        stop:    '<circle cx="12" cy="12" r="8"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
+        file:    '<path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>',
+        download:'<path d="M12 4v11"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>',
+        print:   '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 17h10v3H7z"/>',
+        copy:    '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+        refresh: '<path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/>',
+        shield:  '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>',
+        alert:   '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>',
+        clock:   '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+        sparkle: '<path d="M12 4l1.8 4.7L18.5 10l-4.7 1.8L12 16.5l-1.8-4.7L5.5 10l4.7-1.3z"/>'
+    };
+    function icIcon(name, cls) {
+        const d = IC_ICONS[name];
+        if (!d) return '';
+        return `<svg class="ic-icon ${cls || ''}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
     }
 </script>
 {% block scripts %}{% endblock %}

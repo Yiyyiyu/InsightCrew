@@ -1,23 +1,56 @@
 {% extends "base.html" %}
 {% block title %}报告 · {{ task.topic }}{% endblock %}
 {% block content %}
-<p class="ic-muted" style="margin-bottom:.3rem;">
-    <a href="/tasks">← 任务列表</a> ·
-    <a href="/tasks/{{ task.id }}">任务详情</a> ·
-    <a href="/tasks/{{ task.id }}/evidence">证据台账</a>
-</p>
-<h2 style="margin-bottom:.3rem;">{{ task.topic }}</h2>
-<p class="ic-muted">
-    最终报告 · 引用角标 <code>[S3#12]</code> 可点击查看原文片段
-</p>
+<style>
+    .ic-report-head { margin-bottom: 1.1rem; }
+    .ic-report-head h2 { margin: .35rem 0 .3rem 0; letter-spacing: -.02em; }
+    .ic-crumb { font-size: .86rem; color: var(--ic-ink-2); }
+    .ic-crumb a { color: var(--ic-ink-2); text-decoration: none; }
+    .ic-crumb a:hover { color: var(--ic-accent); }
+    .ic-report-body-wrap {
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: var(--ic-radius); padding: 1.6rem 1.9rem;
+        box-shadow: var(--ic-shadow-sm);
+        max-width: 78ch;   /* 长文可读行长 45-75 字符 */
+        margin: 0 auto;
+    }
+    .ic-ai-note {
+        display: flex; align-items: flex-start; gap: .45rem;
+        margin: .6rem 0 0 0; padding: .5rem .75rem;
+        background: var(--ic-accent-soft); border: 1px solid var(--ic-accent-line);
+        border-radius: var(--ic-radius-sm); color: var(--ic-accent-dark);
+        font-size: .82rem; max-width: 78ch;
+    }
+    .ic-ai-note .ic-icon { margin-top: .12rem; }
+    @media (max-width: 640px) { .ic-report-body-wrap { padding: 1.1rem 1.05rem; } }
+</style>
+<div class="ic-report-head">
+    <p class="ic-crumb ic-noprint" style="margin-bottom:.35rem;">
+        <a href="/tasks">← 任务列表</a> ·
+        <a href="/tasks/{{ task.id }}">任务详情</a> ·
+        <a href="/tasks/{{ task.id }}/evidence">证据台账</a>
+    </p>
+    <h2>{{ task.topic }}</h2>
+    <p class="ic-muted ic-noprint" style="margin:0;">
+        最终报告 · 引用角标 <code>[S3#12]</code> 可点击查看原文片段
+    </p>
+    <!-- AI 生成内容标注（UX 规范 AI Interaction｜Disclaimer：不得把 AI 产出呈现为人工结论） -->
+    <p class="ic-ai-note ic-noprint">
+        <svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
+        本报告由多个 AI Agent 协作生成，关键论断均已挂接引用角标，请以证据台账中的原文为准。
+    </p>
+</div>
 
-<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">
-    <button class="outline" style="width:auto;margin:0;" onclick="icExportMd()">导出 Markdown</button>
+<div class="ic-toolbar" style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.2rem;">
+    <a role="button" class="outline" style="width:auto;margin:0;" href="/tasks/{{ task.id }}/report.md">导出 Markdown</a>
+    <a role="button" class="outline" style="width:auto;margin:0;" href="/tasks/{{ task.id }}/report.pdf">下载 PDF</a>
     <button class="outline secondary" style="width:auto;margin:0;" onclick="icCopyBibtex()">复制 BibTeX</button>
     <button class="outline secondary" style="width:auto;margin:0;" onclick="icPrint()">打印 / 存 PDF</button>
 </div>
 
-<article id="ic-report-body" class="ic-report"></article>
+<div class="ic-report-body-wrap">
+    <article id="ic-report-body" class="ic-report"></article>
+</div>
 
 <details class="ic-card" style="margin-top:1.4rem;">
     <summary>BibTeX（参考文献）</summary>
@@ -29,7 +62,7 @@
     <div class="ic-drawer-head">
         <strong id="ic-drawer-title">证据</strong>
         <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
-                onclick="icCloseDrawer()">✕</button>
+                onclick="icCloseDrawer()" aria-label="关闭"><svg class="ic-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div id="ic-drawer-body"></div>
 </div>
@@ -37,9 +70,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="/static/js/marked.min.js"></script>
 <script>
-const TASK_ID = {{ task.id }};
 const RAW_MD = {{ content_md | tojson }};
 const EVIDENCE = {{ evidence_map | tojson }};
 
@@ -93,24 +125,16 @@ function icEsc(s) {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') icCloseDrawer(); });
 
 // ── 导出 ──
-function icDownload(name, text, mime) {
-    const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
-}
-function icExportMd() {
-    icDownload(`report-task${TASK_ID}.md`, RAW_MD || '');
-    icToast('已导出 Markdown');
-}
 function icCopyBibtex() {
     const txt = document.getElementById('ic-bibtex').textContent;
     navigator.clipboard.writeText(txt)
         .then(() => icToast('BibTeX 已复制'))
         .catch(() => icToast('复制失败，请手动选中'));
 }
-function icPrint() { window.print(); }
+function icPrint() {
+    // 折叠的 <details> 内容打印时不会渲染，先全部展开再调起打印
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    window.print();
+}
 </script>
 {% endblock %}

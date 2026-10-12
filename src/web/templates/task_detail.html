@@ -1,37 +1,96 @@
 {% extends "base.html" %}
 {% block title %}{{ task.topic }} · InsightCrew{% endblock %}
 {% block content %}
-<p class="ic-muted" style="margin-bottom:.3rem;"><a href="/tasks">← 返回任务列表</a></p>
-<h2 style="margin-bottom:.3rem;">{{ task.topic }}</h2>
-<p class="ic-muted">
-    任务 #{{ task.id }} · 创建于 {{ task.created_at }} ·
-    <span id="ic-status-wrap"></span>
-</p>
+<style>
+    .ic-detail-head { margin-bottom: 1.2rem; }
+    .ic-detail-head h2 { margin: .35rem 0 .25rem 0; letter-spacing: -.02em; }
+    .ic-back { font-size: .86rem; color: var(--ic-ink-2); text-decoration: none; }
+    .ic-back:hover { color: var(--ic-accent); }
+    .ic-stat-card {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1.1rem; align-items: center;
+    }
+    .ic-stat-label {
+        font-size: .74rem; text-transform: uppercase; letter-spacing: .06em;
+        color: var(--ic-ink-3); font-weight: 600; margin-bottom: .25rem;
+    }
+    .ic-stat-value { font-weight: 600; font-size: 1rem; }
+    .ic-stat-wide { grid-column: span 2; }
+    @media (max-width: 720px) { .ic-stat-wide { grid-column: span 1; } }
+    .ic-actions-bar {
+        display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: 1.2rem;
+    }
+    .ic-panel-title {
+        font-size: 1rem; margin: 0 0 .7rem 0; display: flex;
+        align-items: center; gap: .5rem;
+    }
+    details.ic-card > summary {
+        cursor: pointer; font-weight: 600; font-size: .9rem;
+        padding: .1rem 0; list-style: none;
+    }
+    details.ic-card > summary::-webkit-details-marker { display: none; }
+    details.ic-card > summary::before {
+        content: "▸"; display: inline-block; margin-right: .45rem;
+        color: var(--ic-ink-3); transition: transform .15s ease;
+    }
+    details.ic-card[open] > summary::before { transform: rotate(90deg); }
+    details.ic-card[open] > summary { margin-bottom: .6rem; }
+    /* 中间产物：只读时显示渲染后的 markdown，闸门可编辑时切回源码（<pre>） */
+    /* ★ 必须自己吞掉超宽内容（用户 m26742 第 3 项）：栅格轨道已用
+       minmax(0,1fr) 把下限归零，宽表格/长 URL 不会再撑开容器，但会从
+       格子右侧溢出去 —— 所以这里让长串可断行、宽表格内部横向滚动。 */
+    .ic-md-view {
+        display: none; font-size: .9rem; line-height: 1.65;
+        overflow-wrap: anywhere; word-break: break-word;
+    }
+    .ic-md-view.ic-show { display: block; }
+    .ic-md.ic-hide { display: none; }
+    .ic-md-view > :first-child { margin-top: 0; }
+    .ic-md-view > :last-child { margin-bottom: 0; }
+    .ic-md-view table { font-size: .84rem; display: block; max-width: 100%; overflow-x: auto; }
+    .ic-md-view pre { background: var(--ic-bg-2, #f1f5f9); padding: .7rem .9rem;
+                      border-radius: 8px; overflow-x: auto; font-size: .82rem; }
+    .ic-md-view code { font-size: .86em; }
+    .ic-md-view blockquote { border-left: 3px solid var(--ic-accent-line);
+                             padding-left: .8rem; color: var(--ic-ink-2); margin-left: 0; }
+    /* 危险操作（删除任务）与禁用态 */
+    button.ic-danger { color: var(--ic-err); border-color: #fecaca; }
+    button.ic-danger:hover:not(:disabled) { background: var(--ic-err-soft); border-color: var(--ic-err); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+</style>
+<div class="ic-detail-head">
+    <a href="/tasks" class="ic-back">← 返回任务列表</a>
+    <h2>{{ task.topic }}</h2>
+    <p class="ic-muted" style="margin:0;">
+        任务 #{{ task.id }} · 创建于 {{ task.created_at }} ·
+        <span id="ic-status-wrap"></span>
+    </p>
+</div>
 
 <!-- 顶部：成本 / 进度 -->
-<div class="ic-card" style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+<div class="ic-card ic-stat-card">
     <div>
-        <div class="ic-muted">当前阶段</div>
-        <div id="ic-stage" style="font-weight:600;">—</div>
+        <div class="ic-stat-label">当前阶段</div>
+        <div id="ic-stage" class="ic-stat-value">—</div>
     </div>
     <div>
-        <div class="ic-muted">已花费 / 上限</div>
+        <div class="ic-stat-label">已花费 / 上限</div>
         <div class="ic-cost"><span id="ic-cost">¥0.0000</span>
             <span class="ic-muted">/ ¥<span id="ic-limit">5.00</span></span></div>
     </div>
-    <div style="min-width:180px;">
-        <div class="ic-muted">执行方式</div>
+    <div>
+        <div class="ic-stat-label">执行方式</div>
         <div id="ic-exec" style="font-size:.9rem;">—</div>
     </div>
-    <div style="min-width:220px;flex:1;">
-        <div class="ic-muted">进度</div>
-        <div class="ic-bar" style="margin-top:.4rem;"><span id="ic-progress" style="width:0%"></span></div>
+    <div class="ic-stat-wide">
+        <div class="ic-stat-label">进度</div>
+        <div class="ic-bar" style="margin-top:.45rem;"><span id="ic-progress" style="width:0%"></span></div>
     </div>
 </div>
 
 <!-- 人工闸门（有 pending 闸门时显示） -->
 <div id="ic-gatebar" class="ic-gatebar" style="display:none;">
-    <h4>⏸ 等待人工确认 — 阶段「<span id="ic-gate-stage"></span>」已完成</h4>
+    <h4><svg class="ic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg> 等待人工确认 — 阶段「<span id="ic-gate-stage"></span>」已完成</h4>
     <p class="ic-muted" style="margin:.2rem 0 .6rem 0;">
         确认继续 → 进入下一阶段；打回重做 → 回退到上一阶段重跑。
     </p>
@@ -44,7 +103,7 @@
     </div>
 </div>
 
-<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;">
+<div class="ic-actions-bar">
     <a id="ic-report-link" role="button" class="outline" style="display:none;width:auto;margin:0;"
        href="#">查看最终报告</a>
     <a id="ic-evidence-link" role="button" class="outline secondary" style="width:auto;margin:0;"
@@ -52,12 +111,14 @@
     <button id="ic-pause" class="outline secondary" style="width:auto;margin:0;"
             title="在下一个阶段边界停下（当前阶段先跑完），随后可确认或打回">请求暂停</button>
     <button id="ic-abort2" class="outline secondary" style="width:auto;margin:0;">中止任务</button>
+    <button id="ic-delete" class="outline ic-danger" style="width:auto;margin:0;margin-left:auto;"
+            title="删除该任务及其全部记录，不可恢复">删除任务</button>
 </div>
 
 <div class="ic-grid">
     <!-- 左：Agent 协作时间线 -->
     <div>
-        <h3 style="font-size:1.05rem;">Agent 协作时间线
+        <h3 class="ic-panel-title">Agent 协作时间线
             <span id="ic-live" class="badge badge-running">实时</span>
         </h3>
         <div id="ic-timeline" class="ic-timeline">
@@ -67,32 +128,38 @@
 
     <!-- 右：中间产物（闸门处可直接编辑，用户 m18267） -->
     <div>
-        <h3 style="font-size:1.05rem;">中间产物
+        <h3 class="ic-panel-title">中间产物
             <span id="ic-edit-hint" class="ic-muted"
                   style="font-size:.75rem;font-weight:400;">（闸门等待时可编辑）</span>
         </h3>
         <details class="ic-card" open>
             <summary>调研大纲（plan）</summary>
+            <div class="ic-md-view" id="ic-v-plan"></div>
             <pre class="ic-md" id="ic-p-plan" data-key="plan_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>分析结论（analysis）</summary>
+            <div class="ic-md-view" id="ic-v-analysis"></div>
             <pre class="ic-md" id="ic-p-analysis" data-key="analysis_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>质疑意见（critic）</summary>
+            <div class="ic-md-view" id="ic-v-critic"></div>
             <pre class="ic-md" id="ic-p-critic" data-key="critic_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>质疑回应（rebuttal）</summary>
+            <div class="ic-md-view" id="ic-v-rebuttal"></div>
             <pre class="ic-md" id="ic-p-rebuttal" data-key="rebuttal_output">—</pre>
         </details>
         <details class="ic-card">
             <summary>报告草稿（write）</summary>
+            <div class="ic-md-view" id="ic-v-report"></div>
             <pre class="ic-md" id="ic-p-report" data-key="report_draft">—</pre>
         </details>
         <details class="ic-card">
             <summary>评审意见（review）</summary>
+            <div class="ic-md-view" id="ic-v-review"></div>
             <pre class="ic-md" id="ic-p-review" data-key="review_output">—</pre>
         </details>
     </div>
@@ -100,10 +167,16 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/marked.min.js"></script>
 <script>
 const TASK_ID = {{ task.id }};
 const STAGES = ['plan', 'research', 'analysis', 'critic', 'rebuttal', 'write', 'review'];
 const STAGE_LABELS = {{ stage_labels | tojson }};
+// 执行方式用中文全称（用户 m25143 第 4 项：不能直接显示后端原始值 "arq"）
+const EXEC_LABELS = {
+    'arq': '异步任务队列（arq + Redis）',
+    'unknown': '—',
+};
 
 // ── 时间线 ──
 const timeline = document.getElementById('ic-timeline');
@@ -125,7 +198,7 @@ function renderStatus(s) {
     document.getElementById('ic-status-wrap').innerHTML = icStatusBadge(s.status);
     document.getElementById('ic-stage').textContent =
         STAGE_LABELS[s.current_stage] || s.current_stage || '—';
-    document.getElementById('ic-exec').textContent = s.exec_path || '—';
+    document.getElementById('ic-exec').textContent = EXEC_LABELS[s.exec_path] || s.exec_path || '—';
     document.getElementById('ic-cost').textContent = '¥' + (s.total_cost_cny || 0).toFixed(4);
     document.getElementById('ic-limit').textContent = (s.budget_limit_cny || 0).toFixed(2);
 
@@ -160,6 +233,7 @@ function renderStatus(s) {
     if (s.rebuttal_output) document.getElementById('ic-p-rebuttal').textContent = s.rebuttal_output;
     if (s.report_draft) document.getElementById('ic-p-report').textContent = s.report_draft;
     if (s.review_output) document.getElementById('ic-p-review').textContent = s.review_output;
+    renderArtifacts();
 
     // 可编辑性跟着闸门走：只有任务停着等确认时才允许改（见后端 PUT /artifact）
     window.__editable = !!(s.pending_gate && s.status === 'running');
@@ -169,11 +243,49 @@ function renderStatus(s) {
     document.querySelectorAll('.ic-md[data-key]').forEach(el => {
         el.classList.toggle('ic-editable', window.__editable);
         el.setAttribute('contenteditable', window.__editable ? 'true' : 'false');
+        // 可编辑时露出源码（<pre>），只读时显示渲染后的 markdown（用户 m25143 第 4 项）
+        el.classList.toggle('ic-hide', !window.__editable);
     });
+    document.querySelectorAll('.ic-md-view').forEach(v => {
+        v.classList.toggle('ic-show', !window.__editable);
+    });
+
+    // 任务已终态：主动收掉 SSE，别让浏览器无限重连（见 closeStream 的说明）
+    if (s.status === 'completed') closeStream('已结束', 'badge-done');
+    else if (s.status === 'aborted') closeStream('已中止', 'badge-aborted');
+    else if (s.status === 'failed') closeStream('已失败', 'badge-failed');
+
     // 暂停按钮：只在跑着、且还没请求暂停时可用
     const pb = document.getElementById('ic-pause');
     pb.disabled = !(s.status === 'running') || !!s.pause_requested;
     pb.textContent = s.pause_requested ? '已请求暂停…' : '请求暂停';
+
+    // 中止按钮：任务已结束就置灰（用户 m25143 第 7 项：只能触发一次）
+    const terminal = ['completed', 'failed', 'aborted'].includes(s.status);
+    const a1 = document.getElementById('ic-abort');
+    const a2 = document.getElementById('ic-abort2');
+    if (!a1.dataset.busy) a1.disabled = terminal;
+    if (!a2.dataset.busy) a2.disabled = terminal;
+}
+
+// 把 6 个中间产物渲染成 markdown（用户 m25143 第 4 项：不要显示源码）。
+// marked 走本地 /static/js/marked.min.js（jsdelivr 在国内不可达，见 base.html 注释）。
+function renderArtifacts() {
+    if (typeof marked === 'undefined') return;   // 脚本没加载就退回源码显示
+    document.querySelectorAll('.ic-md[data-key]').forEach(pre => {
+        const view = document.getElementById('ic-v-' + pre.id.replace('ic-p-', ''));
+        if (!view) return;
+        const raw = pre.textContent;
+        if (!raw || raw === '—') { view.innerHTML = '<p class="ic-muted">（暂无内容）</p>'; return; }
+        try { view.innerHTML = decorateCitations(marked.parse(raw)); }
+        catch (e) { view.textContent = raw; }      // 渲染失败就退回源码，不白屏
+    });
+}
+
+// 中间产物里的引用角标也做成可点（与报告页同一套标记）
+function decorateCitations(html) {
+    return html.replace(/\[S(\d+)#(\d+)\]/g, (m) =>
+        `<button class="ic-cite" data-key="${m}" title="查看证据">${m}</button>`);
 }
 
 async function refreshStatus() {
@@ -186,6 +298,25 @@ async function refreshStatus() {
 
 // ── SSE ──
 // EventSource 会自动带上同源 Cookie（页面鉴权走 Cookie，见 src/api/deps.py）
+//
+// ⚠ 为什么要有 __closed（用户 m25143 第 4 项「一直反复跳重连中/实时」的根因）：
+// 任务进入终态后，服务端会主动结束 SSE 流（src/core/events.py 的 event_stream
+// 在 TERMINAL_EVENTS 或 _task_is_terminal 时 return，这是正确设计）。
+// 但 EventSource 的规范行为是「连接断了就自动重连」——重连上去又立刻被服务端
+// 关掉，于是 onerror→onopen→onerror 无限循环，界面就一直在「重连中 ↔ 实时」
+// 之间闪。修法：一旦确认任务终态，就主动 es.close() 并把徽标改成静态终态，
+// 不再让浏览器去重连。
+let __closed = false;
+const live = document.getElementById('ic-live');
+
+function closeStream(label, cls) {
+    if (__closed) return;
+    __closed = true;
+    try { es.close(); } catch (e) { /* 已关就忽略 */ }
+    live.className = 'badge ' + (cls || 'badge-done');
+    live.textContent = label || '已结束';
+}
+
 const es = new EventSource('/research/' + TASK_ID + '/events');
 
 const HANDLERS = {
@@ -210,8 +341,8 @@ const HANDLERS = {
         `回应率 ${Math.round((d.rate || 0) * 100)}%`),
     stage_error: d => addEvent('err', `阶段出错：${STAGE_LABELS[d.stage] || d.stage}`,
         d.error || ''),
-    pipeline_complete: d => { addEvent('done', '调研流水线完成', ''); refreshStatus(); },
-    pipeline_aborted: d => { addEvent('err', '任务已中止', ''); refreshStatus(); },
+    pipeline_complete: d => { addEvent('done', '调研流水线完成', ''); refreshStatus(); closeStream('已结束', 'badge-done'); },
+    pipeline_aborted: d => { addEvent('err', '任务已中止', ''); refreshStatus(); closeStream('已中止', 'badge-aborted'); },
 };
 
 for (const [type, fn] of Object.entries(HANDLERS)) {
@@ -228,13 +359,16 @@ for (const [type, fn] of Object.entries(HANDLERS)) {
 }
 
 es.onerror = () => {
+    // 终态后不再重连（见上面 __closed 的说明），徽标保持终态文案
+    if (__closed) return;
     // EventSource 会自动重连（带 Last-Event-ID 增量续传，服务端已支持）
-    document.getElementById('ic-live').className = 'badge badge-pending';
-    document.getElementById('ic-live').textContent = '重连中';
+    live.className = 'badge badge-pending';
+    live.textContent = '重连中';
 };
 es.onopen = () => {
-    document.getElementById('ic-live').className = 'badge badge-running';
-    document.getElementById('ic-live').textContent = '实时';
+    if (__closed) return;
+    live.className = 'badge badge-running';
+    live.textContent = '实时';
 };
 
 // ── 闸门动作 ──
@@ -279,16 +413,60 @@ async function syncStage() {
 }
 
 async function abortTask() {
-    if (!confirm('确定中止该任务？')) return;
+    if (!confirm('确定中止该任务？中止后不可恢复。')) return;
+    const b1 = document.getElementById('ic-abort');
+    const b2 = document.getElementById('ic-abort2');
+    // 用户 m25143 第 7 项：只能触发一次。请求发出即置灰，避免连点；
+    // 服务端对终态任务返回 409，这里是体验层的第一道闸。
+    b1.disabled = true; b2.disabled = true;
+    // busy 标记：请求在途时 renderStatus 不得把按钮重新点亮（SSE 会触发刷新）
+    b1.dataset.busy = b2.dataset.busy = '1';
     try {
         const r = await fetch('/research/' + TASK_ID + '/abort', { method: 'POST' });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); icToast(d.detail || '中止失败'); return; }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            icToast(d.detail || '中止失败');
+            delete b1.dataset.busy; delete b2.dataset.busy;
+            b1.disabled = false; b2.disabled = false;   // 失败要能重试
+            return;
+        }
         icToast('任务已中止');
+        closeStream('已中止', 'badge-aborted');
         refreshStatus();
-    } catch (e) { icToast('网络错误：' + e); }
+    } catch (e) {
+        icToast('网络错误：' + e);
+        delete b1.dataset.busy; delete b2.dataset.busy;
+        b1.disabled = false; b2.disabled = false;
+    }
 }
 document.getElementById('ic-abort').addEventListener('click', abortTask);
 document.getElementById('ic-abort2').addEventListener('click', abortTask);
+
+// ── 删除任务（用户 m25143 第 8 项）──
+document.getElementById('ic-delete').addEventListener('click', async () => {
+    const ok = confirm(
+        '确定删除任务 #' + TASK_ID + '？\n\n' +
+        '该任务的论断、证据、事件、报告与用量记录会一并删除，且无法恢复。'
+    );
+    if (!ok) return;
+    const btn = document.getElementById('ic-delete');
+    btn.disabled = true;
+    try {
+        const r = await fetch('/research/' + TASK_ID, { method: 'DELETE' });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            icToast(d.detail || '删除失败');
+            btn.disabled = false;
+            return;
+        }
+        try { es.close(); } catch (e) {}
+        icToast('任务已删除，正在返回列表…');
+        setTimeout(() => { window.location.href = '/tasks'; }, 600);
+    } catch (e) {
+        icToast('网络错误：' + e);
+        btn.disabled = false;
+    }
+});
 
 // ── 暂停请求（把下一个阶段边界临时变成闸门）──
 document.getElementById('ic-pause').addEventListener('click', async () => {

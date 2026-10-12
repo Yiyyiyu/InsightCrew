@@ -91,6 +91,7 @@ from src.core.gates import (
     abort_pipeline,
     advance_stage,
     approve_gate,
+    delete_task,
     pause_pipeline,
     reject_gate,
 )

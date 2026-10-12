@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ code }} · InsightCrew{% endblock %}
 {% block content %}
-<article style="text-align:center;padding:3rem 1rem;">
-    <h1 style="font-size:3rem;margin-bottom:.2rem;">{{ code }}</h1>
+<div class="ic-card" style="text-align:center;padding:3.5rem 1rem;margin-top:2rem;">
+    <h1 style="font-size:3.4rem;margin-bottom:.2rem;letter-spacing:-.03em;
+               background:linear-gradient(120deg,var(--ic-accent) 0%,var(--ic-accent-2) 100%);
+               -webkit-background-clip:text;background-clip:text;color:transparent;">{{ code }}</h1>
     <p style="font-size:1.05rem;">{{ message }}</p>
-    <div style="margin-top:1.4rem;display:flex;gap:.6rem;justify-content:center;">
+    <div style="margin-top:1.6rem;display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;">
         <a role="button" href="{{ back_url or '/tasks' }}" style="width:auto;margin:0;">
             {{ back_label or '返回任务列表' }}
         </a>
@@ -12,5 +14,5 @@
         <a role="button" class="secondary" href="/login" style="width:auto;margin:0;">去登录</a>
         {% endif %}
     </div>
-</article>
+</div>
 {% endblock %}

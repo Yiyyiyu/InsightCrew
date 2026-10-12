@@ -14,8 +14,85 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     username = Column(String(64), unique=True, nullable=False)
+    # 邮箱可选：老账号（如 demo）没有邮箱，注册页填了才写。
+    # 唯一但允许 NULL —— SQLite 里多行 NULL 不冲突，正合「可选」语义。
+    email = Column(String(128), unique=True, nullable=True)
+    # ★ 邮箱验证时间（用户 m26742）：非空才表示这个邮箱真的归用户所有。
+    #   为什么单独一列而不是「有 email 就算绑定」：邮箱是找回密码的唯一凭据，
+    #   写错一个字母的邮箱与「没绑邮箱」一样收不到信，但前者看起来像绑定成功，
+    #   用户到忘记密码那天才发现 —— 那时已经进不来了。
+    #   注册/绑定/换绑都必须先收到验证码并校验通过才写这一列。
+    #   老库补列后为 NULL：既有用户（含 demo）需要重新验证一次邮箱才可改密。
+    email_verified_at = Column(DateTime, nullable=True)
     hashed_password = Column(String(256), nullable=False)
+    # ★ 令牌版本号：改密码时 +1，使此前签发的所有 JWT 立即失效。
+    #   JWT 是无状态的，服务端无法「撤回」一个已发出的 token；把版本号写进
+    #   载荷、校验时与库中值比对，就把无状态令牌变成了可作废令牌。
+    #   老库补列默认 0，老 token 载荷里没有该字段时也按 0 处理，两边一致。
+    token_version = Column(Integer, default=0, nullable=False, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PasswordReset(Base):
+    """找回密码的一次性凭据。
+
+    ★ 只存 ``sha256(token)``，明文 token 仅存在于那封邮件里。
+      数据库泄露也拿不到可用的重置链接（和密码只存 bcrypt 哈希同理）。
+    ★ ``used_at`` 非空即视为已作废 —— 链接只能点一次，重放直接拒绝。
+    """
+
+    __tablename__ = "password_resets"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailCode(Base):
+    """邮箱验证码（用户 m26742：注册 / 绑定邮箱 / 换邮箱 / 改密码都要验证）。
+
+    ## 为什么是一张独立表，而不是塞进 users
+
+    验证码的生命周期与用户不同：一个用户可能反复申请（改错邮箱重来、换绑、
+    改密各一次），是**一对多**；而且注册时**用户还不存在**，没有 user_id 可挂。
+    所以用独立表，`user_id` 可空。
+
+    ## 为什么要分 purpose
+
+    同一个人可能同时有「验证当前邮箱」和「换绑到新邮箱」两个待办。若只按
+    email 查码，换绑时用一个发给旧邮箱的码就能通过 —— 验证的意义就没了。
+    `purpose` 把不同用途的码隔离开，校验必须 (email, purpose) 双命中。
+
+    ## 为什么存 sha256 而不是明文
+
+    与重置令牌同理：库被读走也拿不到可用的验证码（码只有 6 位，但配合
+    5 次尝试上限与 10 分钟有效期，暴力枚举窗口极小）。用 HMAC(密钥) 而非裸
+    sha256 —— 6 位数字的裸哈希一秒就能撞出全表，必须带密钥。
+    """
+
+    __tablename__ = "email_codes"
+    id = Column(Integer, primary_key=True)
+    #: 验证码发往的邮箱（小写归一）。注册时还没有 user_id，只能靠它定位。
+    email = Column(String(128), nullable=False, index=True)
+    #: 关联用户。注册流程为 NULL（账号还没建）。
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    #: register / bind / verify / password —— 见上方「为什么要分 purpose」。
+    purpose = Column(String(32), nullable=False)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    #: 已用掉的码不能再用（一次性）。
+    used_at = Column(DateTime, nullable=True)
+    #: 连续错误次数。达到上限即作废 —— 否则 6 位码可以被慢慢试出来。
+    attempts = Column(Integer, default=0, nullable=False, server_default="0")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        # 按 (email, purpose) 查最新的那条；索引用非唯一即可，
+        # 「同一邮箱同一用途只保留一条有效」由写入时的作废逻辑保证。
+        Index("ix_email_codes_email_purpose", "email", "purpose"),
+    )
 
 
 class Task(Base):

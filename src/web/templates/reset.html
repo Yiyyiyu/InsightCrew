@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}重置密码 · InsightCrew{% endblock %}
+{% block content %}
+<div class="ic-auth-wrap">
+    <div class="ic-auth-card">
+        <div class="ic-auth-head">
+            <div class="ic-auth-logo">重置密码</div>
+            <p class="ic-muted" style="margin:.3rem 0 0 0;">设置一个新密码，旧密码将立即失效</p>
+        </div>
+
+        <!-- 令牌校验中 -->
+        <div id="ic-checking" class="ic-center-block">
+            <div class="ic-spinner" aria-hidden="true"></div>
+            <p class="ic-muted" style="margin:.6rem 0 0 0;">正在校验重置链接 ...</p>
+        </div>
+
+        <!-- 令牌失效 -->
+        <div id="ic-invalid" class="ic-center-block" style="display:none;">
+            <p class="ic-invalid-title">重置链接已失效</p>
+            <p class="ic-muted" id="ic-invalid-reason" style="margin:.4rem 0 1.2rem 0;">
+                链接可能已过期或已被使用。
+            </p>
+            <a href="/forgot" class="ic-cta" style="display:inline-block;text-decoration:none;">
+                重新申请
+            </a>
+        </div>
+
+        <!-- 正常表单 -->
+        <form id="ic-reset-form" onsubmit="return false;" style="display:none;">
+            <label>新密码
+                <input type="password" id="password" name="password" autocomplete="new-password"
+                       placeholder="至少 8 位，建议含大小写与数字" required>
+                <span class="ic-strength" aria-hidden="true"><i id="ic-strength-bar"></i></span>
+                <small class="ic-field-hint" id="ic-hint-password">密码强度：<b id="ic-strength-text">—</b></small>
+            </label>
+
+            <label>确认新密码
+                <input type="password" id="password2" name="password2" autocomplete="new-password"
+                       placeholder="请再次输入新密码" required>
+                <small class="ic-field-hint" id="ic-hint-password2">&nbsp;</small>
+            </label>
+
+            <button type="submit" id="ic-reset-btn" class="ic-cta" style="margin-top:.4rem;">
+                重置密码
+            </button>
+        </form>
+
+        <p class="ic-muted" style="margin-top:1rem;text-align:center;">
+            <a href="/login">返回登录</a>
+        </p>
+        <div id="ic-msg" class="ic-msg"></div>
+    </div>
+    <p class="ic-auth-foot">
+        7 阶段流水线 · 3 道人工闸门 · 全链路引用可追溯
+    </p>
+</div>
+<style>
+    .ic-auth-wrap { max-width: 440px; margin: 5vh auto 0 auto; }
+    .ic-auth-card {
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: 16px; padding: 2rem 1.9rem 1.6rem 1.9rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .05), 0 20px 50px -20px rgba(15, 23, 42, .25);
+    }
+    .ic-auth-head { text-align: center; margin-bottom: 1.5rem; }
+    .ic-auth-logo {
+        display: inline-block; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+        background: linear-gradient(120deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .ic-center-block { text-align: center; padding: 1rem 0 1.4rem 0; }
+    .ic-invalid-title { font-weight: 600; color: var(--ic-err); margin: 0; font-size: 1.02rem; }
+    .ic-spinner {
+        width: 28px; height: 28px; margin: 0 auto; border-radius: 50%;
+        border: 3px solid var(--ic-line); border-top-color: var(--ic-accent);
+        animation: ic-spin .8s linear infinite;
+    }
+    @keyframes ic-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+        .ic-spinner { animation-duration: 2.4s; }
+    }
+    .ic-field-hint {
+        display: block; margin-top: .25rem; font-size: .75rem; color: var(--ic-ink-3);
+        line-height: 1.35;
+    }
+    .ic-field-hint.ic-bad { color: var(--ic-err); }
+    .ic-field-hint.ic-good { color: var(--ic-ok); }
+    .ic-strength {
+        display: block; height: 4px; border-radius: 2px; margin-top: .4rem;
+        background: var(--ic-line); overflow: hidden;
+    }
+    .ic-strength > i {
+        display: block; height: 100%; width: 0; border-radius: 2px;
+        background: var(--ic-err); transition: width .2s ease, background .2s ease;
+    }
+    .ic-msg {
+        margin-top: .8rem; font-size: .85rem; text-align: center;
+        color: var(--ic-err); min-height: 1.2em;
+    }
+    .ic-msg:empty { min-height: 0; }
+    .ic-msg.ic-good { color: var(--ic-ok); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const TOKEN = {{ token|tojson }};
+    const msg = document.getElementById('ic-msg');
+    const btn = document.getElementById('ic-reset-btn');
+    const elPwd = document.getElementById('password');
+    const elPwd2 = document.getElementById('password2');
+
+    /* 密码强度：按「长度 + 字符类别数」粗判，只作提示不作门槛 */
+    function icStrength(pw) {
+        if (!pw) return { score: 0, text: '—', cls: '' };
+        let kinds = 0;
+        if (/[a-z]/.test(pw)) kinds++;
+        if (/[A-Z]/.test(pw)) kinds++;
+        if (/[0-9]/.test(pw)) kinds++;
+        if (/[^A-Za-z0-9]/.test(pw)) kinds++;
+        let score = kinds;
+        if (pw.length >= 12) score++;
+        if (pw.length < 8) score = Math.min(score, 1);
+        if (score <= 2) return { score: 1, text: '弱', cls: 'ic-bad' };
+        if (score <= 3) return { score: 2, text: '中', cls: '' };
+        return { score: 3, text: '强', cls: 'ic-good' };
+    }
+
+    function icSetHint(id, text, cls) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'ic-field-hint' + (cls ? ' ' + cls : '');
+    }
+
+    function icRenderStrength() {
+        const st = icStrength(elPwd.value);
+        const bar = document.getElementById('ic-strength-bar');
+        bar.style.width = (st.score / 3 * 100) + '%';
+        bar.style.background = st.score === 1 ? 'var(--ic-err)'
+            : st.score === 2 ? 'var(--ic-warn)' : 'var(--ic-ok)';
+        document.getElementById('ic-strength-text').textContent = st.text;
+    }
+
+    elPwd.addEventListener('input', () => {
+        icRenderStrength();
+        // 确认框已填过就实时比对，避免改完密码忘了同步确认框
+        if (elPwd2.value) icCheckMatch();
+    });
+
+    function icCheckMatch() {
+        if (!elPwd2.value) { icSetHint('ic-hint-password2', '\u00a0', ''); return true; }
+        if (elPwd.value !== elPwd2.value) {
+            icSetHint('ic-hint-password2', '两次输入的密码不一致', 'ic-bad');
+            return false;
+        }
+        icSetHint('ic-hint-password2', '两次输入一致', 'ic-good');
+        return true;
+    }
+
+    elPwd2.addEventListener('input', icCheckMatch);
+
+    /* 令牌校验：先问服务端这个链接还能不能用，再决定显示表单还是失效态 */
+    async function icVerify() {
+        const checking = document.getElementById('ic-checking');
+        const invalid = document.getElementById('ic-invalid');
+        const form = document.getElementById('ic-reset-form');
+        try {
+            const r = await fetch('/auth/reset/verify?token=' + encodeURIComponent(TOKEN));
+            const d = await r.json().catch(() => ({}));
+            if (d.valid) {
+                checking.style.display = 'none';
+                form.style.display = '';
+                return;
+            }
+            const REASONS = {
+                expired: '链接已过期，请重新申请。',
+                used: '该链接已被使用过，请重新申请。',
+                not_found: '链接无效或已被作废，请重新申请。',
+                bad_token: '链接格式不正确，请确认是从邮件中完整复制。'
+            };
+            document.getElementById('ic-invalid-reason').textContent =
+                REASONS[d.reason] || '链接无效，请重新申请。';
+            checking.style.display = 'none';
+            invalid.style.display = '';
+        } catch (e) {
+            checking.style.display = 'none';
+            invalid.style.display = '';
+            document.getElementById('ic-invalid-reason').textContent = '校验失败：' + e;
+        }
+    }
+
+    document.getElementById('ic-reset-form').addEventListener('submit', async () => {
+        const pw = elPwd.value;
+        const pw2 = elPwd2.value;
+        msg.className = 'ic-msg';
+        msg.textContent = '';
+        if (pw.length < 8) { msg.textContent = '密码至少 8 位'; return; }
+        if (pw !== pw2) { msg.textContent = '两次输入的密码不一致'; return; }
+
+        btn.disabled = true;
+        btn.textContent = '提交中 ...';
+        try {
+            const r = await fetch('/auth/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: TOKEN, password: pw })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                const det = d.detail;
+                msg.textContent = (det && det.message) || det || ('失败：HTTP ' + r.status);
+                // 令牌类错误说明这个链接已经废了，直接切到失效态，别让用户反复试
+                if (d.code === 'reset_invalid') {
+                    document.getElementById('ic-reset-form').style.display = 'none';
+                    document.getElementById('ic-invalid').style.display = '';
+                    document.getElementById('ic-invalid-reason').textContent =
+                        '该链接已失效，请重新申请。';
+                }
+                return;
+            }
+            // 成功：改密后所有旧会话都已作废，弹窗提示后去登录页（用户 m26742）
+            msg.className = 'ic-msg ic-good';
+            msg.textContent = d.msg || '密码已重置';
+            document.getElementById('ic-reset-form').style.display = 'none';
+            icSuccess(d.msg || '密码已重置，请用新密码登录', { redirect: '/login', delay: 2000 });
+        } catch (e) {
+            msg.textContent = '网络错误：' + e;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '重置密码';
+        }
+    });
+
+    icVerify();
+</script>
+{% endblock %}

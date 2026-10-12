@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+{% block title %}注册 · InsightCrew{% endblock %}
+{% block content %}
+<div class="ic-auth-wrap">
+    <div class="ic-auth-card">
+        <div class="ic-auth-head">
+            <div class="ic-auth-logo">InsightCrew</div>
+            <p class="ic-muted" style="margin:.3rem 0 0 0;">创建账号，开始你的技术调研</p>
+        </div>
+
+        <form id="ic-reg-form" onsubmit="return false;">
+            <label>用户名 <span class="ic-req">*</span>
+                <input type="text" id="username" name="username" autocomplete="username"
+                       placeholder="2–64 位，用于登录" required>
+                <small class="ic-field-hint" id="ic-hint-username">至少 2 位字符</small>
+            </label>
+
+            <label>邮箱 <span class="ic-opt">（可选）</span>
+                <input type="email" id="email" name="email" autocomplete="email"
+                       placeholder="用于接收任务通知，可留空">
+                <small class="ic-field-hint" id="ic-hint-email">填写后将校验格式与唯一性</small>
+            </label>
+
+            <!-- 邮箱验证码：仅在填了邮箱时出现（未填邮箱的账号没有找回能力，
+                 也就没有可验证的地址）。留空邮箱时不显示、不提交，避免用户
+                 以为「不填也要收码」。 -->
+            <label id="ic-code-row" hidden>邮箱验证码 <span class="ic-req">*</span>
+                <span class="ic-code-line">
+                    <input type="text" id="code" name="code" inputmode="numeric"
+                           autocomplete="one-time-code" maxlength="6" placeholder="6 位数字">
+                    <button type="button" id="ic-send-code" class="ic-send-btn">获取验证码</button>
+                </span>
+                <small class="ic-field-hint" id="ic-hint-code">验证码 10 分钟内有效</small>
+            </label>
+
+            <label>密码 <span class="ic-req">*</span>
+                <input type="password" id="password" name="password" autocomplete="new-password"
+                       placeholder="至少 8 位，建议含大小写与数字" required>
+                <span class="ic-strength" aria-hidden="true"><i id="ic-strength-bar"></i></span>
+                <small class="ic-field-hint" id="ic-hint-password">密码强度：<b id="ic-strength-text">—</b></small>
+            </label>
+
+            <label>确认密码 <span class="ic-req">*</span>
+                <input type="password" id="password2" name="password2" autocomplete="new-password"
+                       placeholder="请再次输入密码" required>
+                <small class="ic-field-hint" id="ic-hint-password2">&nbsp;</small>
+            </label>
+
+            <label class="ic-check">
+                <input type="checkbox" id="agree" name="agree">
+                <span>我已阅读并同意服务条款与隐私说明</span>
+            </label>
+
+            <button type="submit" id="ic-reg-btn" class="ic-cta" style="margin-top:.4rem;">注册</button>
+        </form>
+
+        <p class="ic-muted" style="margin-top:1rem;text-align:center;">
+            已有账号？<a href="/login">去登录</a>
+        </p>
+        <div id="ic-msg" class="ic-msg"></div>
+    </div>
+    <p class="ic-auth-foot">
+        7 阶段流水线 · 3 道人工闸门 · 全链路引用可追溯
+    </p>
+</div>
+<style>
+    .ic-auth-wrap { max-width: 440px; margin: 5vh auto 0 auto; }
+    .ic-auth-card {
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: 16px; padding: 2rem 1.9rem 1.6rem 1.9rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .05), 0 20px 50px -20px rgba(15, 23, 42, .25);
+    }
+    .ic-auth-head { text-align: center; margin-bottom: 1.5rem; }
+    .ic-auth-logo {
+        display: inline-block; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+        background: linear-gradient(120deg, var(--ic-accent) 0%, var(--ic-accent-2) 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .ic-req { color: var(--ic-err); }
+    .ic-opt { color: var(--ic-ink-3); font-weight: 400; font-size: .82rem; }
+    .ic-field-hint {
+        display: block; margin-top: .25rem; font-size: .75rem; color: var(--ic-ink-3);
+        line-height: 1.35;
+    }
+    .ic-field-hint.ic-bad { color: var(--ic-err); }
+    .ic-field-hint.ic-good { color: var(--ic-ok); }
+    /* 密码强度条：底色是弱化色，内层按强度改宽度与颜色 */
+    .ic-strength {
+        display: block; height: 4px; border-radius: 2px; margin-top: .4rem;
+        background: var(--ic-line); overflow: hidden;
+    }
+    .ic-strength > i {
+        display: block; height: 100%; width: 0; border-radius: 2px;
+        background: var(--ic-err); transition: width .18s ease, background .18s ease;
+    }
+    .ic-check {
+        display: flex; align-items: center; gap: .5rem; margin: .9rem 0 .2rem 0;
+        font-size: .85rem; color: var(--ic-ink-2);
+    }
+    .ic-check input { width: auto; margin: 0; flex: none; }
+    /* 验证码行：输入框占满剩余宽度，按钮不收缩、不换行 */
+    .ic-code-line { display: flex; gap: .5rem; align-items: stretch; }
+    .ic-code-line input { flex: 1 1 auto; min-width: 0; letter-spacing: .18em; }
+    .ic-send-btn {
+        flex: none; width: auto; margin: 0; white-space: nowrap;
+        padding: 0 .9rem; font-size: .85rem; border-radius: 10px;
+        background: var(--ic-surface-2, #f1f5f9); color: var(--ic-ink);
+        border: 1px solid var(--ic-line); cursor: pointer;
+    }
+    .ic-send-btn:hover:not(:disabled) { border-color: var(--ic-accent); color: var(--ic-accent); }
+    .ic-send-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .ic-auth-foot {
+        text-align: center; color: var(--ic-ink-3); font-size: .78rem; margin-top: 1.4rem;
+        letter-spacing: .01em;
+    }
+    .ic-msg {
+        margin-top: .8rem; font-size: .85rem; text-align: center;
+        color: var(--ic-err); min-height: 1.2em;
+    }
+    .ic-msg:empty { min-height: 0; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const elUser = document.getElementById('username');
+    const elEmail = document.getElementById('email');
+    const elPwd = document.getElementById('password');
+    const elPwd2 = document.getElementById('password2');
+    const elAgree = document.getElementById('agree');
+    const elCode = document.getElementById('code');
+    const elCodeRow = document.getElementById('ic-code-row');
+    const elSendCode = document.getElementById('ic-send-code');
+
+    // 邮箱有内容才显示验证码行。★ 不能只在「格式正确」时显示：用户刚敲第一个
+    // 字符时整行会闪一下又消失，很晃眼；格式错误由 hint 文案提示，行本身留着。
+    function icSyncCodeRow() {
+        const has = !!elEmail.value.trim();
+        elCodeRow.hidden = !has;
+        if (!has) elCode.value = '';
+    }
+
+    // 密码强度：按「长度 + 字符类别数」打分，只用来说明，不做强制（强制只看长度）。
+    function icStrength(pw) {
+        if (!pw) return { score: 0, label: '—', color: 'var(--ic-err)' };
+        let score = 0;
+        if (pw.length >= 8) score++;
+        if (pw.length >= 12) score++;
+        if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+        if (/\d/.test(pw)) score++;
+        if (/[^A-Za-z0-9]/.test(pw)) score++;
+        if (score <= 2) return { score: 1, label: '弱', color: 'var(--ic-err)' };
+        if (score <= 3) return { score: 2, label: '中', color: 'var(--ic-warn)' };
+        return { score: 3, label: '强', color: 'var(--ic-ok)' };
+    }
+
+    function icSetHint(id, text, cls) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'ic-field-hint' + (cls ? ' ' + cls : '');
+    }
+
+    function icValidate(showEmpty) {
+        let ok = true;
+
+        const u = elUser.value.trim();
+        if (u && u.length < 2) { icSetHint('ic-hint-username', '用户名至少 2 位', 'ic-bad'); ok = false; }
+        else if (u) icSetHint('ic-hint-username', '可以使用', 'ic-good');
+        else if (showEmpty) { icSetHint('ic-hint-username', '请填写用户名', 'ic-bad'); ok = false; }
+
+        const em = elEmail.value.trim();
+        if (em) {
+            const parts = em.split('@');
+            const good = parts.length === 2 && parts[0] && parts[1].includes('.')
+                         && !em.includes(' ');
+            if (!good) { icSetHint('ic-hint-email', '邮箱格式不正确', 'ic-bad'); ok = false; }
+            else icSetHint('ic-hint-email', '邮箱格式正确', 'ic-good');
+        } else if (!showEmpty) {
+            icSetHint('ic-hint-email', '填写后将校验格式与唯一性');
+        }
+
+        // 填了邮箱就必须有验证码 —— 与后端一致。只检查「有没有填」，
+        // 6 位数字的具体校验交给服务端（前端拦不住绕过，多写一套规则只会两边不一致）。
+        if (em) {
+            const cd = elCode.value.trim();
+            if (!cd && showEmpty) { icSetHint('ic-hint-code', '请先获取并填写验证码', 'ic-bad'); ok = false; }
+            else if (!cd) icSetHint('ic-hint-code', '验证码 10 分钟内有效');
+            else icSetHint('ic-hint-code', '已填写，注册时校验', 'ic-good');
+        }
+
+        const pw = elPwd.value;
+        const st = icStrength(pw);
+        document.getElementById('ic-strength-bar').style.width = (st.score / 3 * 100) + '%';
+        document.getElementById('ic-strength-bar').style.background = st.color;
+        document.getElementById('ic-strength-text').textContent = st.label;
+        if (pw && pw.length < 8) { icSetHint('ic-hint-password', '密码至少 8 位', 'ic-bad'); ok = false; }
+        else if (pw) icSetHint('ic-hint-password', '密码长度符合要求', 'ic-good');
+        else if (showEmpty) { icSetHint('ic-hint-password', '请填写密码', 'ic-bad'); ok = false; }
+
+        const pw2 = elPwd2.value;
+        if (pw2 && pw2 !== pw) { icSetHint('ic-hint-password2', '两次输入的密码不一致', 'ic-bad'); ok = false; }
+        else if (pw2) icSetHint('ic-hint-password2', '两次输入一致', 'ic-good');
+        else if (showEmpty) { icSetHint('ic-hint-password2', '请再次输入密码', 'ic-bad'); ok = false; }
+        else icSetHint('ic-hint-password2', '\u00a0');
+
+        if (showEmpty && !elAgree.checked) {
+            document.getElementById('ic-msg').textContent = '请先勾选同意服务条款';
+            ok = false;
+        }
+        return ok;
+    }
+
+    [elUser, elEmail, elPwd, elPwd2, elCode].forEach(el => {
+        el.addEventListener('input', () => { icSyncCodeRow(); icValidate(false); });
+        el.addEventListener('blur', () => icValidate(false));
+    });
+    icSyncCodeRow();
+
+    // ── 获取验证码 ──
+    // 冷却秒数由服务端返回（settings.email_code_cooldown_sec），前端不写死，
+    // 免得改了后端配置两边对不上。倒计时期间按钮禁用，避免用户连点把限流撞满。
+    let icCooldownTimer = null;
+    function icStartCooldown(sec) {
+        let left = sec;
+        elSendCode.disabled = true;
+        const tick = () => {
+            if (left <= 0) {
+                clearInterval(icCooldownTimer);
+                elSendCode.disabled = false;
+                elSendCode.textContent = '重新获取';
+                return;
+            }
+            elSendCode.textContent = left + 's 后重发';
+            left--;
+        };
+        tick();
+        icCooldownTimer = setInterval(tick, 1000);
+    }
+
+    elSendCode.addEventListener('click', async () => {
+        const em = elEmail.value.trim();
+        if (!em) { icSetHint('ic-hint-email', '请先填写邮箱', 'ic-bad'); elEmail.focus(); return; }
+        // 前端先粗筛一次格式，避免白白发一封注定失败的请求（服务端仍会再校验）
+        const parts = em.split('@');
+        if (!(parts.length === 2 && parts[0] && parts[1].includes('.') && !em.includes(' '))) {
+            icSetHint('ic-hint-email', '邮箱格式不正确', 'ic-bad'); return;
+        }
+        elSendCode.disabled = true;
+        elSendCode.textContent = '发送中…';
+        try {
+            const r = await fetch('/auth/email-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: em, purpose: 'register' })
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                // detail 可能是字符串（业务错误）或对象（带 code 的结构化错误）
+                const d = data.detail;
+                const text = (d && d.message) || (typeof d === 'string' ? d : '发送失败');
+                icSetHint('ic-hint-code', text, 'ic-bad');
+                elSendCode.disabled = false;
+                elSendCode.textContent = '重新获取';
+                return;
+            }
+            icSetHint('ic-hint-code',
+                '已发送至 ' + (data.email || em) + '，' + (data.ttl_min || 10) + ' 分钟内有效',
+                'ic-good');
+            icStartCooldown(data.cooldown_sec || 60);
+        } catch (e) {
+            icSetHint('ic-hint-code', '网络错误：' + e, 'ic-bad');
+            elSendCode.disabled = false;
+            elSendCode.textContent = '重新获取';
+        }
+    });
+
+    async function icSubmit() {
+        const msg = document.getElementById('ic-msg');
+        msg.textContent = '';
+        if (!icValidate(true)) return;
+
+        msg.textContent = '注册中 ...';
+        try {
+            const r = await fetch('/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: elUser.value.trim(),
+                    email: elEmail.value.trim(),
+                    password: elPwd.value,
+                    code: elCode.value.trim()
+                })
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                // detail 可能是字符串，也可能是 {code, message} 结构体（邮箱相关错误）
+                const d = data.detail;
+                msg.textContent = (d && d.message) || (typeof d === 'string' ? d : ('注册失败：HTTP ' + r.status));
+                return;
+            }
+            // 注册成功即自动登录，省一次输入
+            const lr = await fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: elUser.value.trim(), password: elPwd.value })
+            });
+            if (lr.ok) { location.href = '/tasks'; return; }
+            // 注册成功但自动登录失败（比如并发登录限流）：弹窗提示后去登录页，
+            // 而不是「刷新本页」—— 本页是注册表单，刷新只会让用户重填一遍
+            icSuccess('注册成功，请使用新账号登录', { redirect: '/login', delay: 2000 });
+        } catch (e) {
+            msg.textContent = '网络错误：' + e;
+        }
+    }
+
+    document.getElementById('ic-reg-form').addEventListener('submit', icSubmit);
+</script>
+{% endblock %}

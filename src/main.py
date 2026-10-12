@@ -94,6 +94,14 @@ from src.web.routes import router as web_router  # noqa: E402
 
 app.include_router(web_router)
 
+# 静态资源（Pico CSS 等本地化依赖）。必须本地托管：jsdelivr 在国内不可达，
+# CDN 挂了整页退回浏览器默认样式（已踩坑）。
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
 
 # ══════════════════════════════════════════════════════════════
 # 全局异常处理器（C4-4）

@@ -1,31 +1,120 @@
 {% extends "base.html" %}
 {% block title %}任务列表 · InsightCrew{% endblock %}
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
-    <h2 style="margin:0;">调研任务</h2>
-    <button id="ic-new-btn" style="width:auto;margin:0;">+ 新建任务</button>
+<style>
+    .ic-page-head {
+        display: flex; justify-content: space-between; align-items: flex-end;
+        gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem;
+    }
+    .ic-page-title { margin: 0; letter-spacing: -.02em; }
+    .ic-task-item { padding: 1rem 1.15rem; }
+    .ic-task-title {
+        font-weight: 600; font-size: 1.05rem; color: var(--ic-ink);
+        text-decoration: none; letter-spacing: -.01em;
+    }
+    .ic-task-title:hover { color: var(--ic-accent); }
+    .ic-new-form {
+        background: var(--ic-surface); border: 1px solid var(--ic-accent-line);
+        border-radius: var(--ic-radius); padding: 1.3rem 1.4rem 1.4rem 1.4rem;
+        margin-top: 1rem; box-shadow: var(--ic-shadow);
+    }
+    .ic-new-form > header {
+        margin: -.2rem 0 1rem 0; padding-bottom: .7rem;
+        border-bottom: 1px solid var(--ic-line);
+        font-size: 1.02rem; font-weight: 700; letter-spacing: -.01em;
+    }
+    .ic-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.1rem; }
+    @media (max-width: 760px) { .ic-form-grid { grid-template-columns: 1fr; } }
+    .ic-sec-head {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: .6rem; flex-wrap: wrap; margin: 1.3rem 0 .6rem 0;
+        padding-top: 1.1rem; border-top: 1px dashed var(--ic-line);
+    }
+    .ic-sec-head h4 { margin: 0; font-size: .95rem; }
+    .ic-stat-bar {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: .8rem; flex-wrap: wrap; margin-top: 1.2rem;
+    }
+    /* ═══ 检索区 ═══ */
+    .ic-filter-bar {
+        display: flex; align-items: flex-end; gap: .7rem; flex-wrap: wrap;
+        margin-top: 1.3rem; padding: .85rem 1rem;
+        background: var(--ic-surface); border: 1px solid var(--ic-line);
+        border-radius: var(--ic-radius); box-shadow: var(--ic-shadow-sm);
+    }
+    .ic-filter-bar label, .ic-filter-bar .ic-filter-field {
+        margin: 0; font-size: .78rem; color: var(--ic-ink-2); font-weight: 600;
+        display: flex; flex-direction: column; gap: .22rem;
+    }
+    .ic-filter-bar select, .ic-filter-bar input { margin: 0; }
+    .ic-filter-bar select { width: auto; min-width: 9.5rem; padding: .38rem 2rem .38rem .7rem; }
+    .ic-filter-search {
+        position: relative; flex: 1 1 16rem; display: flex; flex-direction: column; gap: .22rem;
+    }
+    .ic-filter-search > svg {
+        position: absolute; left: .65rem; bottom: .62rem; color: var(--ic-ink-3); pointer-events: none;
+    }
+    .ic-filter-search input { padding-left: 2.1rem; margin: 0; }
+    /* ═══ 任务卡片：整卡可点 ═══ */
+    .ic-task-list { margin-top: .7rem; }
+    a.ic-task-item {
+        display: flex; align-items: center; gap: 1rem; text-decoration: none;
+        color: inherit; padding: 1rem 1.15rem;
+    }
+    .ic-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .3rem; }
+    .ic-task-meta { font-size: .82rem; }
+    .ic-task-side { text-align: right; flex: none; }
+    .ic-task-arrow {
+        flex: none; color: var(--ic-ink-3); transition: transform .18s ease, color .18s ease;
+    }
+    a.ic-task-item:hover .ic-task-arrow { transform: translateX(3px); color: var(--ic-accent); }
+    /* ═══ 分组头 ═══ */
+    .ic-group-head {
+        display: flex; align-items: center; gap: .5rem;
+        margin: 1.35rem 0 .5rem 0; font-size: .84rem; font-weight: 700;
+        color: var(--ic-ink-2); letter-spacing: .01em;
+    }
+    .ic-group-head::after {
+        content: ""; flex: 1; height: 1px; background: var(--ic-line);
+    }
+    .ic-group-count {
+        order: -1; display: inline-block; min-width: 1.4rem; text-align: center;
+        padding: .1rem .45rem; border-radius: 999px; font-size: .74rem;
+        background: var(--ic-accent-soft); color: var(--ic-accent-dark);
+        border: 1px solid var(--ic-accent-line);
+    }
+</style>
+<div class="ic-page-head">
+    <div>
+        <h2 class="ic-page-title">调研任务</h2>
+        <p class="ic-muted" style="margin:.2rem 0 0 0;">
+            发起一次多 Agent 协作调研：规划 → 调研 → 分析 → 质疑 → 回应 → 撰写 → 评审
+        </p>
+    </div>
+    <button id="ic-new-btn" class="ic-cta">+ 新建任务</button>
 </div>
 
 <!-- 新建任务表单（默认隐藏） -->
-<article id="ic-new-form" style="display:none;margin-top:1rem;">
-    <header><strong>新建调研任务</strong></header>
-    <label>调研主题
-        <input type="text" id="ic-topic" placeholder="例如：向量数据库选型（Milvus / Qdrant / pgvector）">
-    </label>
-    <label>评估维度 <span class="ic-muted">（可选，逗号分隔）</span>
-        <input type="text" id="ic-dimensions" placeholder="例如：性能, 生态成熟度, 学习曲线, 生产可用性">
-    </label>
-    <label>技术约束 <span class="ic-muted">（可选）</span>
-        <input type="text" id="ic-constraints" placeholder="例如：Python 3.11、不引入商业付费 API、需支持私有化部署">
-    </label>
-    <label style="max-width:260px;">预算上限（元）
-        <input type="number" id="ic-budget" step="0.1" min="0" placeholder="留空用全局默认（¥5.00）">
-    </label>
+<article id="ic-new-form" class="ic-new-form" style="display:none;">
+    <header>新建调研任务</header>
+    <div class="ic-form-grid">
+        <label>调研主题
+            <input type="text" id="ic-topic" placeholder="例如：向量数据库选型（Milvus / Qdrant / pgvector）">
+        </label>
+        <label>预算上限（元）
+            <input type="number" id="ic-budget" step="0.1" min="0" placeholder="留空用全局默认（¥5.00）">
+        </label>
+        <label>评估维度 <span class="ic-muted">（可选，逗号分隔）</span>
+            <input type="text" id="ic-dimensions" placeholder="例如：性能, 生态成熟度, 学习曲线, 生产可用性">
+        </label>
+        <label>技术约束 <span class="ic-muted">（可选）</span>
+            <input type="text" id="ic-constraints" placeholder="例如：Python 3.11、不引入商业付费 API、需私有化部署">
+        </label>
+    </div>
 
     <!-- ── 模型分配：7 个下拉（6 角色 + 读图）── -->
-    <div style="display:flex;justify-content:space-between;align-items:center;
-                gap:.6rem;flex-wrap:wrap;margin:1.1rem 0 .5rem 0;">
-        <h4 style="margin:0;font-size:.95rem;">模型分配 <span class="ic-muted" style="font-weight:400;">
+    <div class="ic-sec-head">
+        <h4>模型分配 <span class="ic-muted" style="font-weight:400;">
             （每个角色一个模型）</span></h4>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
             <span id="ic-lock-chip" class="ic-muted"></span>
@@ -40,45 +129,112 @@
     </div>
     <div id="ic-model-hint" class="ic-muted" style="font-size:.78rem;margin-top:.45rem;"></div>
 
-    <p class="ic-muted" style="margin-top:.9rem;">提交后将依次执行 规划 → 调研 → 分析 → 质疑 → 回应 → 撰写 → 评审 七个阶段，每个阶段结束需要你确认。</p>
+    <p class="ic-muted" style="margin-top:.9rem;">提交后将依次执行 规划 → 调研 → 分析 → 质疑 → 回应 → 撰写 → 评审 七个阶段。其中 <strong>规划 / 调研 / 评审</strong> 三个阶段结束时需要你确认，其余阶段自动推进。</p>
     <div style="display:flex;gap:.6rem;">
-        <button id="ic-create-btn" style="width:auto;margin:0;">启动</button>
+        <button id="ic-create-btn" class="ic-cta">启动</button>
         <button type="button" class="secondary outline" style="width:auto;margin:0;"
                 onclick="document.getElementById('ic-new-form').style.display='none'">取消</button>
     </div>
     <div id="ic-new-msg" class="ic-muted" style="margin-top:.6rem;"></div>
 </article>
 
-{% if tasks %}
-    <div style="margin-top:1.2rem;">
-    {% for t in tasks %}
-        <div class="ic-card">
-            <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
-                <div style="flex:1;min-width:260px;">
-                    <a href="/tasks/{{ t.id }}" style="font-weight:600;font-size:1.05rem;">{{ t.topic }}</a>
-                    <div class="ic-muted" style="margin-top:.3rem;">
-                        #{{ t.id }} · {{ t.created_at }}
-                        · 阶段 {{ stage_labels.get(t.current_stage, t.current_stage) }}
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div>
-                        <span class="badge {{ 'badge-done' if t.status == 'completed' else 'badge-running' if t.status == 'running' else 'badge-failed' if t.status == 'failed' else 'badge-aborted' if t.status == 'aborted' else 'badge-pending' }}">
-                            {{ {'pending':'待开始','running':'运行中','completed':'已完成','failed':'失败','aborted':'已中止'}.get(t.status, t.status) }}
-                        </span>
-                        {% if t.gate_status == 'pending' %}
-                            <span class="badge badge-gate">待人工确认</span>
-                        {% endif %}
-                    </div>
-                    <div class="ic-cost ic-muted" style="margin-top:.35rem;">¥{{ '%.4f'|format(t.total_cost_cny) }}</div>
-                </div>
-            </div>
+{% if tasks or q %}
+    <!-- ═══ 检索区：关键词 + 分组 + 排序（服务端筛选，参数进 URL）═══ -->
+    <form class="ic-filter-bar" method="get" action="/tasks">
+        <div class="ic-filter-search">
+            <svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+            <input type="text" name="q" value="{{ q }}" placeholder="搜索主题或任务号…" aria-label="搜索任务">
         </div>
+        <label class="ic-filter-field">分组
+            <select name="group" onchange="this.form.submit()">
+                <option value="none" {% if group == 'none' %}selected{% endif %}>不分组</option>
+                <option value="stage" {% if group == 'stage' %}selected{% endif %}>按当前阶段</option>
+                <option value="status" {% if group == 'status' %}selected{% endif %}>按状态</option>
+            </select>
+        </label>
+        <label class="ic-filter-field">排序
+            <select name="sort" onchange="this.form.submit()">
+                <option value="created_desc" {% if sort == 'created_desc' %}selected{% endif %}>最新在前</option>
+                <option value="created_asc" {% if sort == 'created_asc' %}selected{% endif %}>最早在前</option>
+                <option value="cost_desc" {% if sort == 'cost_desc' %}selected{% endif %}>费用从高到低</option>
+                <option value="cost_asc" {% if sort == 'cost_asc' %}selected{% endif %}>费用从低到高</option>
+            </select>
+        </label>
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+        <button type="submit" class="outline" style="width:auto;margin:0;">筛选</button>
+        {% if q or group != 'none' or sort != 'created_desc' %}
+            <a role="button" class="outline secondary" href="/tasks" style="width:auto;margin:0;">重置</a>
+        {% endif %}
+    </form>
+
+    <div class="ic-stat-bar">
+        <span class="ic-muted">
+            {% if q %}「{{ q }}」匹配 {{ total }} 个任务{% else %}共 {{ total }} 个任务{% endif %}{% if total_pages > 1 %} · 第 {{ page }} / {{ total_pages }} 页{% endif %}
+        </span>
+        {% if total_pages > 1 %}
+        <span style="display:flex;gap:.4rem;align-items:center;">
+            {% if page > 1 %}
+                <a role="button" class="outline secondary"
+                   style="width:auto;margin:0;padding:.2rem .7rem;font-size:.82rem;"
+                   href="/tasks?{{ qs(page=page - 1) }}">← 上一页</a>
+            {% else %}
+                <button class="outline secondary" disabled
+                        style="width:auto;margin:0;padding:.2rem .7rem;font-size:.82rem;">← 上一页</button>
+            {% endif %}
+            {% if page < total_pages %}
+                <a role="button" class="outline secondary"
+                   style="width:auto;margin:0;padding:.2rem .7rem;font-size:.82rem;"
+                   href="/tasks?{{ qs(page=page + 1) }}">下一页 →</a>
+            {% else %}
+                <button class="outline secondary" disabled
+                        style="width:auto;margin:0;padding:.2rem .7rem;font-size:.82rem;">下一页 →</button>
+            {% endif %}
+        </span>
+        {% endif %}
+    </div>
+
+    {# 整卡可点（用户 m25143 第 3 项）：外层用 <a> 包住卡片，标题不再是唯一入口。
+       卡片内不能嵌套交互元素，所以标题改成 <span>、状态徽标都是纯展示。 #}
+    {% set buckets = groups if group != 'none' else [{'key': '', 'label': '', 'items': tasks}] %}
+    <div class="ic-task-list">
+    {% for b in buckets %}
+        {% if group != 'none' and b['items'] %}
+            <div class="ic-group-head">
+                <span>{{ b['label'] }}</span>
+                <span class="ic-group-count">{{ b['items']|length }}</span>
+            </div>
+        {% endif %}
+        {% for t in b['items'] %}
+        <a class="ic-card ic-card-hover ic-task-item" href="/tasks/{{ t.id }}">
+            <div class="ic-task-main">
+                <span class="ic-task-title">{{ t.topic }}</span>
+                <span class="ic-muted ic-task-meta">
+                    #{{ t.id }} · {{ t.created_at }}
+                    · 阶段 {{ stage_labels.get(t.current_stage, t.current_stage) }}
+                </span>
+            </div>
+            <div class="ic-task-side">
+                <div>
+                    <span class="badge {{ 'badge-done' if t.status == 'completed' else 'badge-running' if t.status == 'running' else 'badge-failed' if t.status == 'failed' else 'badge-aborted' if t.status == 'aborted' else 'badge-pending' }}">
+                        {{ {'pending':'待开始','running':'运行中','completed':'已完成','failed':'失败','aborted':'已中止'}.get(t.status, t.status) }}
+                    </span>
+                    {% if t.gate_status == 'pending' %}
+                        <span class="badge badge-gate">待人工确认</span>
+                    {% endif %}
+                </div>
+                <div class="ic-cost ic-muted" style="margin-top:.35rem;">¥{{ '%.4f'|format(t.total_cost_cny) }}</div>
+            </div>
+            <svg class="ic-icon ic-task-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+        </a>
+        {% endfor %}
     {% endfor %}
     </div>
 {% else %}
     <article style="margin-top:1.2rem;">
-        <p class="ic-muted">还没有调研任务。点击「+ 新建任务」开始第一个。</p>
+        <p class="ic-muted">
+            {% if q %}没有匹配「{{ q }}」的任务。<a href="/tasks">清除筛选</a>
+            {% else %}还没有调研任务。点击「+ 新建任务」开始第一个。{% endif %}
+        </p>
     </article>
 {% endif %}
 
@@ -87,13 +243,13 @@
     <div class="ic-drawer-head">
         <strong>管理来源与模型</strong>
         <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
-                onclick="icCloseDrawer()">✕</button>
+                onclick="icCloseDrawer()" aria-label="关闭"><svg class="ic-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div id="ic-drawer-body">
         <!-- 内置分组 -->
         <div class="ic-card" style="padding:.8rem 1rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;">
-                <strong style="font-size:.92rem;">🔒 官方来源（内置）</strong>
+                <strong style="font-size:.92rem;"><svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11V8a6 6 0 0 1 12 0v3"/><rect x="4" y="11" width="16" height="10" rx="2"/></svg> 官方来源（内置）</strong>
                 <span id="ic-dw-lockstate" class="ic-muted" style="font-size:.8rem;"></span>
             </div>
             <p class="ic-muted" style="font-size:.8rem;margin:.4rem 0 0 0;">
@@ -138,9 +294,9 @@
      transform:translateX(50%) translateY(-12px);opacity:0;pointer-events:none;border-left:none;
      border:1px solid var(--pico-muted-border-color);border-radius:10px;transition:opacity .2s,transform .2s;">
     <div class="ic-drawer-head">
-        <strong>🔒 解锁内置模型</strong>
+        <strong><svg class="ic-icon ic-icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11V8a6 6 0 0 1 12 0v3"/><rect x="4" y="11" width="16" height="10" rx="2"/></svg> 解锁内置模型</strong>
         <button class="outline secondary" style="width:auto;margin:0;padding:.2rem .6rem;"
-                onclick="icCloseUnlock()">✕</button>
+                onclick="icCloseUnlock()" aria-label="关闭"><svg class="ic-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div style="padding:1rem;">
         <label>解锁密码

@@ -12,7 +12,10 @@ from typing import Optional
 from src.core.errors import ServiceUnavailableError
 from src.core.logger import logger
 from src.db.database import async_session
-from src.db.models import Task, HumanReview, Report
+from src.db.models import (
+    Task, HumanReview, Report, TaskEvent, Claim, ClaimEvidence, LlmCall, Evaluation,
+)
+from sqlalchemy import delete, select
 
 from src.core.events import _push_event
 from src.core.queue import (
@@ -302,10 +305,54 @@ async def _finish_pipeline(task_id: int):
     logger.info(f"[{task_id}] 调研流水线完成")
 
 
-async def abort_pipeline(task_id: int):
-    """中止任务"""
-    await _update_task_status(task_id, "aborted")
+async def abort_pipeline(task_id: int) -> bool:
+    """中止任务。已是终态则幂等返回 False（用户 m25143 第 7 项：只能触发一次）。
+
+    返回 True = 本次真的中止了；False = 任务本来就已经结束，什么都没做。
+    调用方据此区分「刚中止」和「重复点击」，避免二次调用又推一条
+    pipeline_aborted 事件把时间线弄脏。
+    """
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        if not task:
+            return False
+        if task.status in ("completed", "failed", "aborted"):
+            return False          # 终态：不再改状态、不再推事件
+        task.status = "aborted"
+        task.updated_at = datetime.utcnow()
+        await session.commit()
     await _push_event(task_id, "pipeline_aborted", {})
+    return True
+
+
+async def delete_task(task_id: int, user_id: int) -> bool:
+    """删除任务及其全部关联记录（用户 m25143 第 8 项）。
+
+    返回 True = 已删除；False = 任务不存在或不属于该用户。
+    user_id 必须参与判定 —— 只按 task_id 删会让任何登录用户删掉别人的任务。
+
+    删除顺序：先删「被引用方」，再删 tasks 行。SQLite 默认不开外键级联，
+    这里显式逐表清理，并把 claims→claim_evidence 放在 claims 之前。
+    """
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        if not task or task.user_id != user_id:
+            return False
+
+        # claim_evidence 挂在 claim 上，必须先删（没有 task_id 列，用子查询定位）
+        claim_ids = (await session.execute(
+            select(Claim.id).where(Claim.task_id == task_id)
+        )).scalars().all()
+        if claim_ids:
+            await session.execute(
+                delete(ClaimEvidence).where(ClaimEvidence.claim_id.in_(claim_ids))
+            )
+        for model in (Claim, TaskEvent, HumanReview, LlmCall, Report, Evaluation):
+            await session.execute(delete(model).where(model.task_id == task_id))
+        await session.delete(task)
+        await session.commit()
+    logger.info(f"[{task_id}] 任务及全部关联记录已删除（user={user_id}）")
+    return True
 
 async def _update_task_status(task_id: int, status: str):
     """更新任务状态"""

@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}个人信息 · InsightCrew{% endblock %}
+{% block content %}
+<div class="ic-page-head">
+    <div>
+        <h2 class="ic-page-title">个人信息</h2>
+        <p class="ic-muted" style="margin:.2rem 0 0 0;">账号资料与登录安全</p>
+    </div>
+    <a href="/tasks" class="outline secondary ic-back-btn">返回任务列表</a>
+</div>
+
+<div class="ic-grid ic-profile-grid">
+    <!-- 账号概览 -->
+    <article class="ic-card">
+        <h3 class="ic-panel-title">账号</h3>
+        <div class="ic-kv">
+            <div class="ic-kv-row">
+                <span class="ic-kv-k">用户名</span>
+                <span class="ic-kv-v">{{ user.username }}</span>
+            </div>
+            <div class="ic-kv-row">
+                <span class="ic-kv-k">用户 ID</span>
+                <span class="ic-kv-v">{{ user.user_id }}</span>
+            </div>
+            <div class="ic-kv-row">
+                <span class="ic-kv-k">邮箱</span>
+                <span class="ic-kv-v" id="ic-cur-email">
+                    {% if user.db_email %}
+                        {{ user.db_email }}
+                        {% if user.db_email_verified %}
+                        <span class="badge badge-done" id="ic-cur-email-badge">已验证</span>
+                        {% else %}
+                        <span class="badge badge-pending" id="ic-cur-email-badge">未验证</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge badge-pending">未填写</span>{% endif %}
+                </span>
+            </div>
+        </div>
+        <p class="ic-hint-block">
+            用户名是登录凭据，暂不支持修改。邮箱用于接收密码重置链接，
+            <b>必须验证通过</b>才能用于找回密码与修改密码。
+        </p>
+    </article>
+
+    <!-- 邮箱 -->
+    <article class="ic-card">
+        <h3 class="ic-panel-title">邮箱</h3>
+        <form id="ic-email-form" onsubmit="return false;">
+            <label>邮箱地址
+                <input type="email" id="ic-email" name="email" autocomplete="email"
+                       placeholder="you@example.com"
+                       value="{{ user.db_email or '' }}">
+                <small class="ic-field-hint" id="ic-email-hint">
+                    换邮箱需验证旧邮箱与新邮箱；留空则清除绑定
+                </small>
+            </label>
+
+            <!-- 旧邮箱验证码：仅当「已绑定且已验证」且要换号时出现。
+                 首次绑定没有旧邮箱可发码，强行要求会死锁。 -->
+            <label id="ic-oldcode-row" hidden>当前邮箱验证码 <span class="ic-req">*</span>
+                <span class="ic-code-line">
+                    <input type="text" id="ic-oldcode" inputmode="numeric"
+                           autocomplete="one-time-code" maxlength="6" placeholder="6 位数字">
+                    <button type="button" id="ic-send-oldcode" class="ic-send-btn">获取验证码</button>
+                </span>
+                <small class="ic-field-hint" id="ic-oldcode-hint">
+                    发送至当前邮箱 {{ user.db_email }}
+                </small>
+            </label>
+
+            <label id="ic-newcode-row" hidden>新邮箱验证码 <span class="ic-req">*</span>
+                <span class="ic-code-line">
+                    <input type="text" id="ic-newcode" inputmode="numeric"
+                           autocomplete="one-time-code" maxlength="6" placeholder="6 位数字">
+                    <button type="button" id="ic-send-newcode" class="ic-send-btn">获取验证码</button>
+                </span>
+                <small class="ic-field-hint" id="ic-newcode-hint">验证码 10 分钟内有效</small>
+            </label>
+
+            <button type="submit" id="ic-email-btn" class="ic-cta" style="width:auto;">
+                保存邮箱
+            </button>
+            <div id="ic-email-msg" class="ic-inline-msg"></div>
+        </form>
+    </article>
+
+    <!-- 改密码 -->
+    <article class="ic-card">
+        <h3 class="ic-panel-title">修改密码</h3>
+        {% if user.db_email_verified %}
+        <form id="ic-pwd-form" onsubmit="return false;">
+            <label>原密码
+                <input type="password" id="ic-old-pwd" autocomplete="current-password"
+                       placeholder="请输入当前密码" required>
+            </label>
+            <label>新密码
+                <input type="password" id="ic-new-pwd" autocomplete="new-password"
+                       placeholder="至少 8 位，建议含大小写与数字" required>
+                <span class="ic-strength" aria-hidden="true"><i id="ic-strength-bar"></i></span>
+                <small class="ic-field-hint" id="ic-hint-pwd">密码强度：<b id="ic-strength-text">—</b></small>
+            </label>
+            <label>确认新密码
+                <input type="password" id="ic-new-pwd2" autocomplete="new-password"
+                       placeholder="请再次输入新密码" required>
+                <small class="ic-field-hint" id="ic-hint-pwd2">&nbsp;</small>
+            </label>
+            <!-- 邮箱验证码（用户 m26742）：改密要同时证明「知道旧密码」与
+                 「控制着绑定邮箱」。会话被劫持时，光有旧密码还不够。 -->
+            <label>邮箱验证码 <span class="ic-req">*</span>
+                <span class="ic-code-line">
+                    <input type="text" id="ic-pwd-code" inputmode="numeric"
+                           autocomplete="one-time-code" maxlength="6" placeholder="6 位数字">
+                    <button type="button" id="ic-send-pwdcode" class="ic-send-btn">获取验证码</button>
+                </span>
+                <small class="ic-field-hint" id="ic-pwd-code-hint">
+                    发送至 {{ user.db_email }}，10 分钟内有效
+                </small>
+            </label>
+            <button type="submit" id="ic-pwd-btn" class="ic-cta" style="width:auto;">
+                修改密码
+            </button>
+            <div id="ic-pwd-msg" class="ic-inline-msg"></div>
+        </form>
+        <p class="ic-hint-block">
+            修改后其它设备上的登录会立即失效，本设备会保持登录。
+        </p>
+        {% else %}
+        <!-- 未绑定/未验证邮箱时不给表单：提交了也必然被后端拒（400 email_unverified），
+             直接告诉用户先去验证，比让他填完再报错好。 -->
+        <p class="ic-hint-block" style="margin-top:0;">
+            修改密码需要验证已绑定的邮箱。你当前
+            {% if user.db_email %}邮箱 <b>{{ user.db_email }}</b> 尚未验证{% else %}还没有绑定邮箱{% endif %}，
+            请先在上方「邮箱」一栏完成{% if user.db_email %}验证{% else %}绑定并验证{% endif %}。
+        </p>
+        {% endif %}
+    </article>
+</div>
+
+<style>
+    .ic-back-btn { width: auto; margin: 0; text-decoration: none; display: inline-flex; align-items: center; }
+    .ic-profile-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .ic-kv { margin: .2rem 0 .9rem 0; }
+    .ic-kv-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .55rem 0; border-bottom: 1px solid var(--ic-line-soft);
+    }
+    .ic-kv-row:last-child { border-bottom: none; }
+    .ic-kv-k { color: var(--ic-ink-2); font-size: .85rem; }
+    .ic-kv-v { font-weight: 600; font-size: .88rem; word-break: break-all; text-align: right; }
+    .ic-hint-block {
+        color: var(--ic-ink-3); font-size: .78rem; line-height: 1.6;
+        margin: .8rem 0 0 0;
+    }
+    .ic-inline-msg {
+        margin-top: .6rem; font-size: .84rem; min-height: 1.2em; color: var(--ic-err);
+    }
+    .ic-inline-msg:empty { min-height: 0; }
+    .ic-inline-msg.ic-good { color: var(--ic-ok); }
+    .ic-field-hint {
+        display: block; margin-top: .25rem; font-size: .75rem; color: var(--ic-ink-3);
+        line-height: 1.35;
+    }
+    .ic-field-hint.ic-bad { color: var(--ic-err); }
+    .ic-field-hint.ic-good { color: var(--ic-ok); }
+    .ic-strength {
+        display: block; height: 4px; border-radius: 2px; margin-top: .4rem;
+        background: var(--ic-line); overflow: hidden;
+    }
+    .ic-strength > i {
+        display: block; height: 100%; width: 0; border-radius: 2px;
+        background: var(--ic-err); transition: width .2s ease, background .2s ease;
+    }
+    /* 与注册页同一套验证码行样式（这里是页面级 CSS，注册页在它自己的
+       <style> 里有一份等价定义 —— 两处都改才一致，别只改一边）。 */
+    .ic-req { color: var(--ic-err); }
+    .ic-code-line { display: flex; gap: .5rem; align-items: stretch; }
+    .ic-code-line input { flex: 1 1 auto; min-width: 0; letter-spacing: .18em; }
+    .ic-send-btn {
+        flex: none; width: auto; margin: 0; white-space: nowrap;
+        padding: 0 .9rem; font-size: .85rem; border-radius: 10px;
+        background: var(--ic-surface-2, #f1f5f9); color: var(--ic-ink);
+        border: 1px solid var(--ic-line); cursor: pointer;
+    }
+    .ic-send-btn:hover:not(:disabled) { border-color: var(--ic-accent); color: var(--ic-accent); }
+    .ic-send-btn:disabled { opacity: .55; cursor: not-allowed; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const emailMsg = document.getElementById('ic-email-msg');
+    const pwdMsg = document.getElementById('ic-pwd-msg');
+    const elEmail = document.getElementById('ic-email');
+    const elOld = document.getElementById('ic-old-pwd');
+    const elNew = document.getElementById('ic-new-pwd');
+    const elNew2 = document.getElementById('ic-new-pwd2');
+
+    function setMsg(el, text, ok) {
+        if (!el) return;
+        el.className = 'ic-inline-msg' + (ok ? ' ic-good' : '');
+        el.textContent = text;
+    }
+
+    /* ★ detail 可能是字符串（业务错误），也可能是 {code, message} 结构体
+       （邮箱相关错误统一这么返回）。不统一取一次的话，页面会显示
+       "[object Object]" —— 这类「后端换了返回形态、前端没跟上」的错位
+       不会报错，只会静默显示成垃圾文本。 */
+    function detailText(d, fallback) {
+        if (d && typeof d === 'object') return d.message || fallback;
+        if (typeof d === 'string' && d) return d;
+        return fallback;
+    }
+
+    /* ── 验证码：注册页与个人信息页共用同一套发码逻辑 ──
+       url/purpose 决定服务端校验哪条路：register/bind 用请求体邮箱，
+       verify/password 用库里已绑定的邮箱（前端传的 email 会被忽略）。 */
+    async function icSendCode(url, purpose, email, btn, hintEl) {
+        const old = btn.textContent;
+        btn.disabled = true; btn.textContent = '发送中…';
+        const fail = (text) => {
+            hintEl.className = 'ic-field-hint ic-bad';
+            hintEl.textContent = text;
+            btn.disabled = false; btn.textContent = old;
+        };
+        try {
+            const body = { purpose };
+            if (email) body.email = email;   // verify/password 不传，避免误导
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { fail(detailText(d.detail, '发送失败：HTTP ' + r.status)); return; }
+            hintEl.className = 'ic-field-hint ic-good';
+            hintEl.textContent = '已发送至 ' + (d.email || email || '绑定邮箱')
+                               + '，' + (d.ttl_min || 10) + ' 分钟内有效';
+            // 冷却秒数由服务端给（settings.email_code_cooldown_sec），前端不写死
+            let left = d.cooldown_sec || 60;
+            let timer = null;
+            const tick = () => {
+                if (left <= 0) {
+                    if (timer) clearInterval(timer);
+                    btn.disabled = false; btn.textContent = '重新获取';
+                    return;
+                }
+                btn.textContent = left + 's 后重发';
+                left--;
+            };
+            tick();
+            // 只在确实还在倒计时时才挂定时器，否则 cooldown_sec=0 会留下一个
+            // 永远不会被清掉的 interval（按钮文案已复原，但每秒钟仍在跑）
+            if (left > 0) timer = setInterval(tick, 1000);
+        } catch (e) {
+            fail('网络错误：' + e);
+        }
+    }
+
+    /* 密码强度：与注册页/重置页同一套判据 */
+    function icStrength(pw) {
+        if (!pw) return { score: 0, text: '—' };
+        let kinds = 0;
+        if (/[a-z]/.test(pw)) kinds++;
+        if (/[A-Z]/.test(pw)) kinds++;
+        if (/[0-9]/.test(pw)) kinds++;
+        if (/[^A-Za-z0-9]/.test(pw)) kinds++;
+        let score = kinds;
+        if (pw.length >= 12) score++;
+        if (pw.length < 8) score = Math.min(score, 1);
+        if (score <= 2) return { score: 1, text: '弱' };
+        if (score <= 3) return { score: 2, text: '中' };
+        return { score: 3, text: '强' };
+    }
+
+    function icRenderStrength() {
+        const st = icStrength(elNew.value);
+        const bar = document.getElementById('ic-strength-bar');
+        bar.style.width = (st.score / 3 * 100) + '%';
+        bar.style.background = st.score === 1 ? 'var(--ic-err)'
+            : st.score === 2 ? 'var(--ic-warn)' : 'var(--ic-ok)';
+        document.getElementById('ic-strength-text').textContent = st.text;
+    }
+
+    function icCheckMatch() {
+        const hint = document.getElementById('ic-hint-pwd2');
+        if (!elNew2.value) { hint.textContent = '\u00a0'; hint.className = 'ic-field-hint'; return true; }
+        if (elNew.value !== elNew2.value) {
+            hint.textContent = '两次输入的密码不一致';
+            hint.className = 'ic-field-hint ic-bad';
+            return false;
+        }
+        hint.textContent = '两次输入一致';
+        hint.className = 'ic-field-hint ic-good';
+        return true;
+    }
+
+    elNew.addEventListener('input', () => { icRenderStrength(); if (elNew2.value) icCheckMatch(); });
+    elNew2.addEventListener('input', icCheckMatch);
+
+    /* ══ 邮箱区：按「当前状态」决定要哪些验证码 ══
+       服务端常量注入，不在前端重新推断 —— 前端推断一旦和服务端不一致
+       （比如把「有邮箱但未验证」当成已验证），会显示出用户根本填不出来的表单。 */
+    const CUR_EMAIL = {{ (user.db_email or '') | tojson }};
+    const CUR_VERIFIED = {{ 'true' if user.db_email_verified else 'false' }};
+
+    const elOldCode = document.getElementById('ic-oldcode');
+    const elNewCode = document.getElementById('ic-newcode');
+    const oldCodeRow = document.getElementById('ic-oldcode-row');
+    const newCodeRow = document.getElementById('ic-newcode-row');
+
+    /* 行显隐规则（与服务端分支严格对应）：
+         · 输入为空            → 两个都不显示（这是在「清空邮箱」，不需要码）
+         · 输入等于当前邮箱    → 两个都不显示（什么都没改）
+         · 输入是新邮箱 + 当前已验证   → 旧码 + 新码（换号要双向证明）
+         · 输入是新邮箱 + 当前未验证/无 → 只有新码（首次绑定，没有旧邮箱可发） */
+    function icSyncCodeRows() {
+        const val = elEmail.value.trim();
+        const changed = !!val && val.toLowerCase() !== (CUR_EMAIL || '').toLowerCase();
+        newCodeRow.hidden = !changed;
+        oldCodeRow.hidden = !(changed && CUR_VERIFIED);
+        if (!changed) { elNewCode.value = ''; elOldCode.value = ''; }
+        if (!CUR_VERIFIED) elOldCode.value = '';
+    }
+    elEmail.addEventListener('input', icSyncCodeRows);
+    icSyncCodeRows();
+
+    document.getElementById('ic-send-newcode').addEventListener('click', () => {
+        const val = elEmail.value.trim();
+        if (!val) { setMsg(emailMsg, '请先填写新邮箱', false); return; }
+        icSendCode('/auth/email-code', 'bind', val,
+                   document.getElementById('ic-send-newcode'),
+                   document.getElementById('ic-newcode-hint'));
+    });
+    document.getElementById('ic-send-oldcode').addEventListener('click', () => {
+        // purpose=verify → 服务端忽略请求体里的 email，一律发往库里已绑定的那个
+        icSendCode('/auth/email-code', 'verify', '',
+                   document.getElementById('ic-send-oldcode'),
+                   document.getElementById('ic-oldcode-hint'));
+    });
+
+    /* 保存邮箱 */
+    document.getElementById('ic-email-form').addEventListener('submit', async () => {
+        const btn = document.getElementById('ic-email-btn');
+        const email = elEmail.value.trim();
+        const needNew = !newCodeRow.hidden;
+        const needOld = !oldCodeRow.hidden;
+        if (needNew && !elNewCode.value.trim()) { setMsg(emailMsg, '请填写新邮箱验证码', false); return; }
+        if (needOld && !elOldCode.value.trim()) { setMsg(emailMsg, '请填写当前邮箱验证码', false); return; }
+        btn.disabled = true; btn.textContent = '保存中 ...';
+        try {
+            const r = await fetch('/profile/email', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    code: needNew ? elNewCode.value.trim() : '',
+                    old_code: needOld ? elOldCode.value.trim() : ''
+                })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { setMsg(emailMsg, detailText(d.detail, '保存失败：HTTP ' + r.status), false); return; }
+            // 成功：弹窗提示 + 2 秒后自动刷新（用户 m26742）。
+            // 页面上的「当前邮箱」「已验证徽标」「改密区是否可用」都依赖这次
+            // 写入的结果，只改一行文案会让页面停在旧状态上。
+            icSuccess(d.email ? '邮箱已保存并验证：' + d.email : '邮箱已清除');
+        } catch (e) {
+            setMsg(emailMsg, '网络错误：' + e, false);
+        } finally {
+            btn.disabled = false; btn.textContent = '保存邮箱';
+        }
+    });
+
+    /* ══ 改密码区 ══
+       未验证邮箱时服务端不渲染表单（上面那条 if 判断），所以这里所有元素
+       都可能不存在 —— 必须判空，否则一个 getElementById(...).addEventListener
+       就会让整页 JS 停在这里，连邮箱区的按钮都点不动。 */
+    const pwdCodeEl = document.getElementById('ic-pwd-code');
+    const sendPwdCodeBtn = document.getElementById('ic-send-pwdcode');
+    if (sendPwdCodeBtn) {
+        sendPwdCodeBtn.addEventListener('click', () => {
+            icSendCode('/auth/email-code', 'password', '', sendPwdCodeBtn,
+                       document.getElementById('ic-pwd-code-hint'));
+        });
+    }
+    const pwdForm = document.getElementById('ic-pwd-form');
+    if (pwdForm) pwdForm.addEventListener('submit', async () => {
+        const btn = document.getElementById('ic-pwd-btn');
+        const oldPw = elOld.value, newPw = elNew.value, newPw2 = elNew2.value;
+        if (!oldPw) { setMsg(pwdMsg, '请输入原密码', false); return; }
+        if (newPw.length < 8) { setMsg(pwdMsg, '新密码至少 8 位', false); return; }
+        if (newPw !== newPw2) { setMsg(pwdMsg, '两次输入的新密码不一致', false); return; }
+        if (newPw === oldPw) { setMsg(pwdMsg, '新密码不能与原密码相同', false); return; }
+        if (!pwdCodeEl.value.trim()) { setMsg(pwdMsg, '请填写邮箱验证码', false); return; }
+
+        btn.disabled = true; btn.textContent = '提交中 ...';
+        try {
+            const r = await fetch('/profile/password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    old_password: oldPw,
+                    new_password: newPw,
+                    code: pwdCodeEl.value.trim()
+                })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { setMsg(pwdMsg, detailText(d.detail, '修改失败：HTTP ' + r.status), false); return; }
+            elOld.value = elNew.value = elNew2.value = '';
+            pwdCodeEl.value = '';
+            icRenderStrength();
+            document.getElementById('ic-hint-pwd2').textContent = '\u00a0';
+            // 成功：弹窗 + 2 秒后自动刷新（用户 m26742）。
+            // 改密会让 token_version +1 作废其它会话，服务端已在响应里重签了
+            // 本设备 cookie，刷新后仍是登录态 —— 文案要说清这点，否则用户看到
+            // 「刷新」会担心自己被登出。
+            icSuccess(d.msg ? d.msg + '，本设备保持登录' : '密码已修改，本设备保持登录');
+        } catch (e) {
+            setMsg(pwdMsg, '网络错误：' + e, false);
+        } finally {
+            btn.disabled = false; btn.textContent = '修改密码';
+        }
+    });
+</script>
+{% endblock %}

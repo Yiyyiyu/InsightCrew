@@ -61,6 +61,34 @@ class Settings(BaseSettings):
     jwt_access_ttl_min: int = 30
     jwt_refresh_ttl_days: int = 7
 
+    # ---- 找回密码（邮件重置链接）----
+    # Resend 的 API Key（`re_` 开头）。**不入仓库**（.env 里设）。
+    # 留空时 mailer 降级为「把邮件正文打到日志」，本机调试不必先配好发信。
+    resend_api_key: str = ""
+    # 发件人。★ 必须是 Resend 后台已验证域名下的地址，
+    # 否则 Resend 直接 403（未验证域名只能发往账号本人邮箱，做不了找回密码）。
+    mail_from: str = "InsightCrew <noreply@yiyyiyu.cloud>"
+    # 站点外部可访问地址，用于拼重置链接。
+    # 本机是 http://127.0.0.1:8000；部署后必须改成真实域名/IP，
+    # 否则邮件里的链接指向用户自己电脑。
+    app_base_url: str = "http://127.0.0.1:8000"
+    # 重置链接有效期（分钟）。短一点更安全：邮件可能被长期留在收件箱。
+    password_reset_ttl_min: int = 30
+    # 图形验证码有效期（秒）。只用于「提交邮箱申请重置」这一处，
+    # 太短用户还没输完就过期，太长则失去限流意义。
+    captcha_ttl_sec: int = 300
+
+    # ---- 邮箱验证码（用户 m26742）----
+    # 注册 / 绑定邮箱 / 换邮箱 / 改密码都要先验证邮箱，验证码走邮件。
+    # 有效期（分钟）。比图形验证码长：用户要去收件箱翻邮件，5 分钟太紧。
+    email_code_ttl_min: int = 10
+    # 位数。6 位配合下面的尝试上限，暴力枚举窗口约百万分之一 × 5 次。
+    email_code_length: int = 6
+    # 同一验证码允许的最大错误次数，超过即作废（防慢慢试出来）。
+    email_code_max_attempts: int = 5
+    # 同一邮箱两次发码的最小间隔（秒）。防「换 IP 刷爆别人邮箱」。
+    email_code_cooldown_sec: int = 60
+
     # ---- 模型 ----
     deepseek_api_key: str = ""
     zhipu_api_key: str = ""
